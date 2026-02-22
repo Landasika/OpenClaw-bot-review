@@ -356,10 +356,11 @@ export async function POST() {
     const gatewayToken = config.gateway?.auth?.token || "";
 
     // Phase 2: Agent session tests via chatCompletions API (sequential)
-    // Uses agent main session to avoid polluting feishu DM session updatedAt
+    // Uses x-openclaw-session-key to route messages to feishu DM sessions
     const agentResults: PlatformTestResult[] = [];
     for (const id of agentIds) {
-      const sessionKey = `agent:${id}:main`;
+      const dmUser = getFeishuDmUser(id);
+      const sessionKey = dmUser ? `agent:${id}:feishu:direct:${dmUser}` : `agent:${id}:main`;
       const r = await testAgentSession(id, sessionKey, gatewayPort, gatewayToken);
       agentResults.push({
         agentId: r.agentId,

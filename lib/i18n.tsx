@@ -177,7 +177,7 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // nav sidebar
     "nav.overview": "Overview",
-    "nav.agents": "Agents",
+    "nav.agents": "Bots",
     "nav.models": "Models",
     "nav.monitor": "Monitor",
     "nav.sessions": "Sessions",

@@ -163,6 +163,7 @@ function ResponseTrendChart({ data, height = 180, t }: { data: DayStat[]; height
 interface PlatformTestResult {
   ok: boolean;
   reply?: string;
+  detail?: string;
   error?: string;
   elapsed: number;
 }
@@ -207,7 +208,7 @@ function PlatformBadge({ platform, agentId, gatewayPort, gatewayToken, t, testRe
       ) : testResult === null ? (
         <span className="text-xs text-[var(--text-muted)] animate-pulse">⏳</span>
       ) : testResult.ok ? (
-        <span className="text-green-400 text-sm cursor-help" title={`${testResult.elapsed}ms${testResult.reply ? ' · ' + testResult.reply : ''}`}>✅</span>
+        <span className="text-green-400 text-sm cursor-help" title={`${testResult.elapsed}ms${testResult.detail ? ' · ' + testResult.detail : testResult.reply ? ' · ' + testResult.reply : ''}`}>✅</span>
       ) : (
         <span className="text-red-400 text-sm cursor-help" title={testResult.error || ''}>❌</span>
       )}
@@ -298,6 +299,19 @@ function AgentCard({ agent, gatewayPort, gatewayToken, t, testResult, platformTe
                 <PlatformBadge key={i} platform={p} agentId={agent.id} gatewayPort={gatewayPort} gatewayToken={gatewayToken} t={t} testResult={pResult} />
               );
             })}
+            {/* Agent session health check result */}
+            {(() => {
+              const aKey = `${agent.id}:agent`;
+              const aResult = platformTestResults ? platformTestResults[aKey] : undefined;
+              if (aResult === undefined) return null;
+              if (aResult === null) return <span className="text-xs text-[var(--text-muted)] animate-pulse">⏳ Agent...</span>;
+              return (
+                <span className={`inline-flex items-center gap-1 text-xs ${aResult.ok ? "text-green-400" : "text-red-400"}`}
+                  title={aResult.ok ? `${aResult.elapsed}ms${aResult.detail ? ' · ' + aResult.detail : ''}` : aResult.error || ''}>
+                  {aResult.ok ? "✅" : "❌"} Agent {aResult.ok ? `(${aResult.elapsed}ms)` : ""}
+                </span>
+              );
+            })()}
           </div>
         </div>
 

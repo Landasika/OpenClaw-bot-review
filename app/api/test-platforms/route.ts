@@ -16,20 +16,6 @@ interface PlatformTestResult {
   elapsed: number;
 }
 
-interface AgentTestResult {
-  agentId: string;
-  ok: boolean;
-  reply?: string;
-  error?: string;
-  elapsed: number;
-}
-
-interface FullTestResult {
-  agentId: string;
-  platform: PlatformTestResult;
-  agent: AgentTestResult;
-}
-
 // Find the most recent feishu DM user open_id for a given agent
 // Each feishu app has its own open_id namespace, so we must use per-agent open_ids
 function getFeishuDmUser(agentId: string): string | null {
@@ -361,21 +347,21 @@ export async function POST() {
     const platformResults = await Promise.all(platformTests);
 
     // Phase 2: Agent session tests (sequential to avoid overloading gateway)
-    const agentResults: AgentTestResult[] = [];
+    const agentResults: PlatformTestResult[] = [];
     for (const id of agentIds) {
-      agentResults.push(testAgentSession(id));
+      const r = testAgentSession(id);
+      agentResults.push({
+        agentId: r.agentId,
+        platform: "agent",
+        ok: r.ok,
+        detail: r.reply,
+        error: r.error,
+        elapsed: r.elapsed,
+      });
     }
 
-    // Combine results
-    const results: FullTestResult[] = agentIds.map(id => ({
-      agentId: id,
-      platform: platformResults.find(r => r.agentId === id) || {
-        agentId: id, platform: "unknown", ok: false, error: "No platform test", elapsed: 0,
-      },
-      agent: agentResults.find(r => r.agentId === id) || {
-        agentId: id, ok: false, error: "No agent test", elapsed: 0,
-      },
-    }));
+    // Flatten all results: platform tests + agent tests
+    const results = [...platformResults, ...agentResults];
 
     return NextResponse.json({ results });
   } catch (err: any) {

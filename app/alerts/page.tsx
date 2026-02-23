@@ -37,7 +37,12 @@ export default function AlertsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkResults, setCheckResults] = useState<string[]>([]);
+  const [lastCheckTime, setLastCheckTime] = useState<string>("");
+  const [checkInterval, setCheckInterval] = useState(5); // 默认 5 分钟检查一次
 
+  // 加载配置
   useEffect(() => {
     Promise.all([
       fetch("/api/alerts").then((r) => r.json()),
@@ -50,6 +55,46 @@ export default function AlertsPage() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  // 定时检查告警
+  useEffect(() => {
+    if (!config?.enabled) return;
+    
+    const checkAlerts = () => {
+      setChecking(true);
+      fetch("/api/alerts/check", { method: "POST" })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.results && data.results.length > 0) {
+            setCheckResults(data.results);
+            setLastCheckTime(new Date().toLocaleTimeString("zh-CN"));
+          }
+        })
+        .catch(console.error)
+        .finally(() => setChecking(false));
+    };
+
+    // 立即检查一次
+    checkAlerts();
+
+    // 设置定时器
+    const timer = setInterval(checkAlerts, checkInterval * 60 * 1000);
+    return () => clearInterval(timer);
+  }, [config?.enabled, checkInterval]);
+
+  const handleManualCheck = () => {
+    setChecking(true);
+    fetch("/api/alerts/check", { method: "POST" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.results && data.results.length > 0) {
+          setCheckResults(data.results);
+          setLastCheckTime(new Date().toLocaleTimeString("zh-CN"));
+        }
+      })
+      .catch(console.error)
+      .finally(() => setChecking(false));
+  };
 
   const handleToggle = () => {
     if (!config) return;
@@ -152,13 +197,62 @@ export default function AlertsPage() {
             {t("alerts.subtitle") || "Configure system alerts and notifications"}
           </p>
         </div>
-        <Link
-          href="/"
-          className="px-4 py-2 rounded-lg bg-[var(--card)] border border-[var(--border)] text-sm hover:border-[var(--accent)] transition"
-        >
-          {t("common.backHome") || "Back"}
-        </Link>
+        <div className="flex items-center gap-3">
+          {/* 检查间隔设置 */}
+          {config.enabled && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-[var(--text-muted)]">检查间隔:</span>
+              <select
+                value={checkInterval}
+                onChange={(e) => setCheckInterval(Number(e.target.value))}
+                className="px-2 py-1 text-sm rounded border border-[var(--border)] bg-[var(--card)] text-[var(--text)]"
+              >
+                <option value={1}>1 分钟</option>
+                <option value={5}>5 分钟</option>
+                <option value={10}>10 分钟</option>
+                <option value={30}>30 分钟</option>
+              </select>
+            </div>
+          )}
+          {/* 手动检查按钮 */}
+          {config.enabled && (
+            <button
+              onClick={handleManualCheck}
+              disabled={checking}
+              className="px-4 py-2 rounded-lg bg-[var(--card)] border border-[var(--border)] text-sm hover:border-[var(--accent)] transition disabled:opacity-50"
+            >
+              {checking ? "⏳ 检查中..." : "🔄 立即检查"}
+            </button>
+          )}
+          <Link
+            href="/"
+            className="px-4 py-2 rounded-lg bg-[var(--card)] border border-[var(--border)] text-sm hover:border-[var(--accent)] transition"
+          >
+            {t("common.backHome") || "Back"}
+          </Link>
+        </div>
       </div>
+
+      {/* 检查结果展示 */}
+      {config.enabled && checkResults.length > 0 && (
+        <div className="p-4 rounded-xl border border-yellow-500/30 bg-yellow-500/10 mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold text-yellow-400">⚠️ 告警触发 ({checkResults.length})</h3>
+            {lastCheckTime && <span className="text-xs text-[var(--text-muted)]">{lastCheckTime}</span>}
+          </div>
+          <ul className="space-y-1">
+            {checkResults.map((result, i) => (
+              <li key={i} className="text-sm text-yellow-300">• {result}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {config.enabled && checking && (
+        <div className="p-4 rounded-xl border border-[var(--border)] bg-[var(--card)] mb-6 text-center text-[var(--text-muted)]">
+          ⏳ 正在检查告警...
+        </div>
+      )}
 
       {/* 告警总开关 */}
       <div className="p-5 rounded-xl border border-[var(--border)] bg-[var(--card)] mb-6">

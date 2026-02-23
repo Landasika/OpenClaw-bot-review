@@ -194,7 +194,24 @@ function SessionList({ agentId }: { agentId: string }) {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+
+    // 从 localStorage 恢复测试结果
+    const savedTestResults = localStorage.getItem('sessionTestResults');
+    if (savedTestResults) {
+      try {
+        setTestResults(JSON.parse(savedTestResults));
+      } catch (e) {
+        console.error('Failed to parse sessionTestResults from localStorage', e);
+      }
+    }
   }, [agentId]);
+
+  // 保存测试结果到 localStorage
+  useEffect(() => {
+    if (Object.keys(testResults).length > 0) {
+      localStorage.setItem('sessionTestResults', JSON.stringify(testResults));
+    }
+  }, [testResults]);
 
   if (loading) {
     return (

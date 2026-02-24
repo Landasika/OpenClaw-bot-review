@@ -243,8 +243,25 @@ function ModelBadge({ model }: { model: string }) {
   );
 }
 
+// Agent 状态标签
+function AgentStatusBadge({ state, t }: { state?: string; t: TFunc }) {
+  const config: Record<string, { dot: string; text: string; color: string; pulse?: boolean }> = {
+    working: { dot: "bg-green-400", text: t("agent.status.working"), color: "text-green-400", pulse: true },
+    online: { dot: "bg-green-400", text: t("agent.status.online"), color: "text-green-400" },
+    idle: { dot: "bg-yellow-400", text: t("agent.status.idle"), color: "text-yellow-400" },
+    offline: { dot: "bg-red-400", text: t("agent.status.offline"), color: "text-red-400" },
+  };
+  const c = config[state || "offline"] || config.offline;
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs ${c.color}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${c.dot} ${c.pulse ? "animate-pulse" : ""}`} />
+      {c.text}
+    </span>
+  );
+}
+
 // Agent 卡片
-function AgentCard({ agent, gatewayPort, gatewayToken, t, testResult, platformTestResults, sessionTestResult }: { agent: Agent; gatewayPort: number; gatewayToken?: string; t: TFunc; testResult?: { ok: boolean; text?: string; error?: string; elapsed: number } | null; platformTestResults?: Record<string, PlatformTestResult | null>; sessionTestResult?: { ok: boolean; reply?: string; error?: string; elapsed: number } | null }) {
+function AgentCard({ agent, gatewayPort, gatewayToken, t, testResult, platformTestResults, sessionTestResult, agentState }: { agent: Agent; gatewayPort: number; gatewayToken?: string; t: TFunc; testResult?: { ok: boolean; text?: string; error?: string; elapsed: number } | null; platformTestResults?: Record<string, PlatformTestResult | null>; sessionTestResult?: { ok: boolean; reply?: string; error?: string; elapsed: number } | null; agentState?: string }) {
   const sessionKey = `agent:${agent.id}:main`;
   let sessionUrl = `http://localhost:${gatewayPort}/chat?session=${encodeURIComponent(sessionKey)}`;
   if (gatewayToken) sessionUrl += `&token=${encodeURIComponent(gatewayToken)}`;
@@ -266,9 +283,10 @@ function AgentCard({ agent, gatewayPort, gatewayToken, t, testResult, platformTe
     >
       <div className="flex items-center gap-2 mb-2">
         <span className="text-2xl">{agent.emoji}</span>
-        <div>
+        <div className="flex-1">
           <h3 className="text-lg font-semibold text-[var(--text)]">{agent.name}</h3>
         </div>
+        <AgentStatusBadge state={agentState} t={t} />
       </div>
 
       <div className="space-y-1.5">
@@ -401,6 +419,7 @@ export default function Home() {
   const [testingPlatforms, setTestingPlatforms] = useState(false);
   const [sessionTestResults, setSessionTestResults] = useState<Record<string, { ok: boolean; reply?: string; error?: string; elapsed: number } | null> | null>(null);
   const [testingSessions, setTestingSessions] = useState(false);
+  const [agentStates, setAgentStates] = useState<Record<string, string>>({});
 
   const RANGE_LABELS: Record<TimeRange, string> = { daily: t("range.daily"), weekly: t("range.weekly"), monthly: t("range.monthly") };
 
@@ -548,6 +567,25 @@ export default function Home() {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [refreshInterval, fetchData]);
 
+  // Agent 状态轮询 (30秒)
+  useEffect(() => {
+    const fetchStatus = () => {
+      fetch("/api/agent-status")
+        .then(r => r.json())
+        .then(d => {
+          if (d.statuses) {
+            const map: Record<string, string> = {};
+            for (const s of d.statuses) map[s.agentId] = s.state;
+            setAgentStates(map);
+          }
+        })
+        .catch(() => {});
+    };
+    fetchStatus();
+    const timer = setInterval(fetchStatus, 30000);
+    return () => clearInterval(timer);
+  }, []);
+
   if (error && !data) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -637,7 +675,7 @@ export default function Home() {
       {/* 卡片墙 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {data.agents.map((agent) => (
-          <AgentCard key={agent.id} agent={agent} gatewayPort={data.gateway?.port || 18789} gatewayToken={data.gateway?.token} t={t} testResult={testResults?.[agent.id]} platformTestResults={platformTestResults || undefined} sessionTestResult={sessionTestResults?.[agent.id]} />
+          <AgentCard key={agent.id} agent={agent} gatewayPort={data.gateway?.port || 18789} gatewayToken={data.gateway?.token} t={t} testResult={testResults?.[agent.id]} platformTestResults={platformTestResults || undefined} sessionTestResult={sessionTestResults?.[agent.id]} agentState={agentStates[agent.id]} />
         ))}
       </div>
 

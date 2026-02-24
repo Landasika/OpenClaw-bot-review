@@ -92,6 +92,12 @@ const translations: Record<Locale, Record<string, string>> = {
     "agent.lastActive": "最近活跃",
     "agent.todayAvgResponse": "平均响应",
     "agent.todayAvgResponseTip": "今日平均响应时间",
+
+    // agent status
+    "agent.status.working": "工作中",
+    "agent.status.online": "在线",
+    "agent.status.idle": "空闲",
+    "agent.status.offline": "离线",
     "agent.inUse": "使用中:",
     "agent.openChat": "点击打开聊天页面",
 
@@ -282,6 +288,12 @@ const translations: Record<Locale, Record<string, string>> = {
     "agent.lastActive": "Last Active",
     "agent.todayAvgResponse": "Avg Response",
     "agent.todayAvgResponseTip": "Today's average response time",
+
+    // agent status
+    "agent.status.working": "Working",
+    "agent.status.online": "Online",
+    "agent.status.idle": "Idle",
+    "agent.status.offline": "Offline",
     "agent.inUse": "Used by:",
     "agent.openChat": "Click to open chat",
 

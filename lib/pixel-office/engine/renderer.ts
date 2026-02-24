@@ -90,7 +90,7 @@ export function renderTileGrid(
   // Subtle grid lines at half-tile intervals (ceramic tile effect)
   ctx.save()
   ctx.strokeStyle = 'rgba(0,0,0,0.06)'
-  ctx.lineWidth = 1
+  ctx.lineWidth = 2
   const halfS = s / 2
   ctx.beginPath()
   for (let c = 0; c <= tmCols * 2; c++) {

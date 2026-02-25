@@ -126,12 +126,14 @@ export default function PixelOfficePage() {
   const contributionsRef = useRef<ContributionData | null>(null)
   const photographRef = useRef<HTMLImageElement | null>(null)
   const gatewayRef = useRef<{ port: number; token?: string }>({ port: 18789 })
+  const providersRef = useRef<Array<{ id: string; api: string; models: Array<{ id: string; name: string; contextWindow?: number }>; usedBy: Array<{ id: string; emoji: string; name: string }> }>>([])
   const [isEditMode, setIsEditMode] = useState(false)
   const [soundOn, setSoundOn] = useState(true)
   const [editorTick, setEditorTick] = useState(0)
   const [officeReady, setOfficeReady] = useState(false)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [fullscreenPhoto, setFullscreenPhoto] = useState(false)
+  const [showModelPanel, setShowModelPanel] = useState(false)
 
   const forceEditorUpdate = useCallback(() => setEditorTick(t => t + 1), [])
 
@@ -331,6 +333,7 @@ export default function PixelOfficePage() {
         }
         agentStatsRef.current = map
         if (data.gateway) gatewayRef.current = { port: data.gateway.port || 18789, token: data.gateway.token }
+        if (data.providers) providersRef.current = data.providers
       } catch {}
     }
     fetchStats()
@@ -497,9 +500,16 @@ export default function PixelOfficePage() {
         return tileX >= f.col && tileX < f.col + entry.footprintW &&
                tileY >= f.row && tileY < f.row + entry.footprintH
       })
+      const onLibrary = office.layout.furniture.some(f => {
+        if (f.uid !== 'library-r') return false
+        const entry = getCatalogEntry(f.type)
+        if (!entry) return false
+        return tileX >= f.col && tileX < f.col + entry.footprintW &&
+               tileY >= f.row && tileY < f.row + entry.footprintH
+      })
       const onPhoto = photographRef.current && tileX >= 10 && tileX < 17 && tileY >= -0.5 && tileY < 1
       const onHeatmap = contributionsRef.current && contributionsRef.current.username !== 'mock' && tileX >= 1 && tileX < 10 && tileY >= -0.5 && tileY < 1
-      if (canvasRef.current) canvasRef.current.style.cursor = (onCamera || onPC || id !== null || onPhoto || onHeatmap) ? 'pointer' : 'default'
+      if (canvasRef.current) canvasRef.current.style.cursor = (onCamera || onPC || onLibrary || id !== null || onPhoto || onHeatmap) ? 'pointer' : 'default'
     }
   }
 
@@ -540,6 +550,15 @@ export default function PixelOfficePage() {
           let chatUrl = `http://localhost:${gw.port}/chat?session=${encodeURIComponent(sessionKey)}`
           if (gw.token) chatUrl += `&token=${encodeURIComponent(gw.token)}`
           window.open(chatUrl, '_blank')
+        } else if (office.layout.furniture.some(f => {
+          if (f.uid !== 'library-r') return false
+          const entry = getCatalogEntry(f.type)
+          if (!entry) return false
+          return tileX >= f.col && tileX < f.col + entry.footprintW &&
+                 tileY >= f.row && tileY < f.row + entry.footprintH
+        })) {
+          // Click on right bookshelf — show model panel
+          setShowModelPanel(true)
         } else if (photographRef.current && tileX >= 10 && tileX < 17 && tileY >= -0.5 && tileY < 1) {
           // Click on wall photograph — fullscreen view
           setFullscreenPhoto(true)
@@ -922,6 +941,46 @@ export default function PixelOfficePage() {
             </div>
           )
         })()}
+
+        {/* Model panel (bookshelf click) */}
+        {showModelPanel && !isEditMode && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40" onClick={() => setShowModelPanel(false)}>
+            <div className="w-80 max-h-[80%] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl p-4" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-3">
+                <span className="font-semibold text-[var(--text)]">📚 {t('models.title')}</span>
+                <button onClick={() => setShowModelPanel(false)} className="text-[var(--text-muted)] hover:text-[var(--text)] text-lg leading-none">×</button>
+              </div>
+              {providersRef.current.length === 0 ? (
+                <div className="text-xs text-[var(--text-muted)]">{t('common.noData')}</div>
+              ) : (
+                <div className="space-y-3">
+                  {providersRef.current.map(provider => (
+                    <div key={provider.id} className="rounded-lg border border-[var(--border)] bg-[var(--bg)] p-2.5">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs font-semibold text-[var(--accent)]">{provider.id}</span>
+                        {provider.usedBy.length > 0 && (
+                          <div className="flex gap-1">
+                            {provider.usedBy.map(a => (
+                              <span key={a.id} className="text-sm" title={a.name}>{a.emoji}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        {provider.models.map(model => (
+                          <div key={model.id} className="flex items-center justify-between text-xs">
+                            <span className="text-[var(--text)] truncate mr-2">🧠 {model.name || model.id}</span>
+                            {model.contextWindow && <span className="text-[var(--text-muted)] whitespace-nowrap">{formatTokens(model.contextWindow)}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Fullscreen photograph viewer */}
         {fullscreenPhoto && photographRef.current && (

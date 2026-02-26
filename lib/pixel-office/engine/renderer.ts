@@ -383,7 +383,7 @@ export function renderScene(
       const snippets = ch.codeSnippets
       const baseX = Math.round(offsetX + ch.x * zoom)
       const baseY = drawY
-      const snipFontSize = Math.max(8, Math.round(3.5 * zoom))
+      const snipFontSize = Math.max(12, Math.round(7 * zoom))
       drawables.push({
         zY: charZY + 0.2,
         draw: (c) => {

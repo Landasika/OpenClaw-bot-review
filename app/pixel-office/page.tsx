@@ -142,6 +142,8 @@ export default function PixelOfficePage() {
   const versionInfoRef = useRef<{ tag: string; name: string; publishedAt: string; body: string; htmlUrl: string } | null>(null)
   const [showIdleRank, setShowIdleRank] = useState(false)
   const idleRankRef = useRef<Array<{ agentId: string; onlineMinutes: number; activeMinutes: number; idleMinutes: number; idlePercent: number }> | null>(null)
+  const floatingCommentsRef = useRef<Array<{ key: string; text: string; x: number; y: number; opacity: number }>>([])
+  const [floatingTick, setFloatingTick] = useState(0)
   const forceEditorUpdate = useCallback(() => setEditorTick(t => t + 1), [])
 
   // Load saved layout and sound preference
@@ -248,6 +250,42 @@ export default function PixelOfficePage() {
           { selectedAgentId: null, hoveredAgentId, hoveredTile: null, seats: office.seats, characters: office.characters },
           editorRender, office.layout.tileColors, office.layout.cols, office.layout.rows,
           contributionsRef.current ?? undefined, photographRef.current ?? undefined)
+
+        // Collect photo comment positions for DOM rendering
+        const zoom = zoomRef.current
+        const pan = panRef.current
+        const cols = office.layout.cols
+        const rows = office.layout.rows
+        const mapW = cols * TILE_SIZE * zoom
+        const mapH = rows * TILE_SIZE * zoom
+        const ox = (width - mapW) / 2 + pan.x
+        const oy = (height - mapH) / 2 + pan.y
+        const containerTop = container.offsetTop
+        const lifetime = 4.0
+        const items: Array<{ key: string; text: string; x: number; y: number; opacity: number }> = []
+        for (const ch of office.getCharacters()) {
+          if (ch.photoComments.length === 0) continue
+          const anchorX = ox + ch.x * zoom
+          const anchorY = containerTop + oy + (ch.y - 24) * zoom
+          const totalDist = anchorY + 20
+          for (let i = 0; i < ch.photoComments.length; i++) {
+            const pc = ch.photoComments[i]
+            const progress = pc.age / lifetime
+            let alpha = 1.0
+            if (pc.age < 0.3) alpha = pc.age / 0.3
+            if (progress > 0.6) alpha = (1 - progress) / 0.4
+            const floatY = progress * totalDist
+            items.push({
+              key: `${ch.id}-${i}-${pc.text}`,
+              text: pc.text,
+              x: anchorX + pc.x * zoom,
+              y: anchorY - floatY,
+              opacity: Math.max(0, alpha * 0.95),
+            })
+          }
+        }
+        floatingCommentsRef.current = items
+        setFloatingTick(t => t + 1)
       }
       animationFrameIdRef.current = requestAnimationFrame(render)
     }
@@ -943,7 +981,17 @@ export default function PixelOfficePage() {
     ? officeRef.current?.layout.furniture.find(f => f.uid === editor.selectedFurnitureUid) : null
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative overflow-hidden">
+      {/* Floating photo comment DOM bubbles */}
+      {floatingCommentsRef.current.map(fc => (
+        <div key={fc.key} className="absolute pointer-events-none z-30 whitespace-nowrap"
+          style={{ left: fc.x, top: fc.y, opacity: fc.opacity, transform: 'translateX(-50%)' }}>
+          <span className="inline-block px-3 py-1 rounded-full text-sm font-bold"
+            style={{ backgroundColor: 'rgba(0,0,0,0.8)', color: '#FFD700' }}>
+            {fc.text}
+          </span>
+        </div>
+      ))}
       {/* Top bar: agent tags + controls */}
       <div className="flex flex-wrap items-center gap-2 p-4 border-b border-[var(--border)]">
         <span className="text-sm font-bold text-[var(--text)] mr-2">{t('pixelOffice.title')}</span>

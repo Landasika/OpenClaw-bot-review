@@ -740,13 +740,15 @@ export function renderPhotoComments(
   offsetY: number,
   zoom: number,
 ): void {
-  const lifetime = 2.0
+  const lifetime = 4.0
+  const canvasH = ctx.canvas.height / (window.devicePixelRatio || 1)
   for (const ch of characters) {
     if (ch.photoComments.length === 0) continue
     const sittingOff = ch.state === CharacterState.TYPE ? BUBBLE_SITTING_OFFSET_PX : 0
     const anchorX = Math.round(offsetX + ch.x * zoom)
     const anchorY = Math.round(offsetY + (ch.y + sittingOff - BUBBLE_VERTICAL_OFFSET_PX) * zoom)
     const fontSize = Math.max(10, Math.round(4 * zoom))
+    const totalFloatDist = anchorY + 20 // distance from character to top of canvas
 
     ctx.save()
     ctx.font = `bold ${fontSize}px sans-serif`
@@ -756,9 +758,9 @@ export function renderPhotoComments(
     for (const pc of ch.photoComments) {
       const progress = pc.age / lifetime
       let alpha = 1.0
-      if (pc.age < 0.2) alpha = pc.age / 0.2
-      if (progress > 0.7) alpha = (1 - progress) / 0.3
-      const floatY = pc.age * 10 * zoom
+      if (pc.age < 0.3) alpha = pc.age / 0.3
+      if (progress > 0.6) alpha = (1 - progress) / 0.4
+      const floatY = progress * totalFloatDist
       const baseX = anchorX + pc.x * zoom
       const baseY = anchorY - floatY
 
@@ -893,9 +895,6 @@ export function renderFrame(
 
   // Speech bubbles (always on top of characters)
   renderBubbles(ctx, characters, offsetX, offsetY, zoom)
-
-  // Photo comment bubbles (idle characters admiring the photograph)
-  renderPhotoComments(ctx, characters, offsetX, offsetY, zoom)
 
   // Editor overlays
   if (editor) {

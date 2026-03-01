@@ -1090,7 +1090,7 @@ export default function PixelOfficePage() {
         <div key={fc.key} className="absolute pointer-events-none z-40 whitespace-nowrap"
           style={{ left: fc.x, top: fc.y, opacity: fc.opacity, transform: 'translateX(-50%)' }}>
           <span
-            className="inline-block px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold"
+            className="inline-block px-2 py-0.5 rounded-md text-sm font-mono font-semibold"
             style={{ backgroundColor: 'rgba(0,0,0,0.72)', color: '#4ade80' }}
           >
             {fc.text}

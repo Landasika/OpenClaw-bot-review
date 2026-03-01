@@ -185,6 +185,7 @@ interface PlatformTestResult {
 // 平台标签颜色
 function PlatformBadge({ platform, agentId, gatewayPort, gatewayToken, gatewayHost, t, testResult }: { platform: Platform; agentId: string; gatewayPort: number; gatewayToken?: string; gatewayHost?: string; t: TFunc; testResult?: PlatformTestResult | null }) {
   const pName = platform.name;
+  const badgeWidthClass = "w-[7.25rem]";
 
   let sessionKey: string;
   if (pName === "feishu" && platform.botOpenId) {
@@ -215,29 +216,29 @@ function PlatformBadge({ platform, agentId, gatewayPort, gatewayToken, gatewayHo
     : t("platform.discord");
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="inline-flex items-center gap-1.5 max-w-full">
       <a
         href={sessionUrl}
         target="_blank"
         rel="noopener noreferrer"
         onClick={(e) => e.stopPropagation()}
         title={t("agent.openChat")}
-        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-all hover:scale-105 hover:shadow-md ${badgeStyle}`}
+        className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-all hover:scale-105 hover:shadow-md min-w-0 ${badgeWidthClass} ${badgeStyle}`}
       >
-        {label}
-        {platform.accountId && (
-          <span className="opacity-60">({platform.accountId})</span>
+        <span className="truncate">{label}</span>
+        {pName === "feishu" && platform.accountId && (
+          <span className="opacity-60 truncate max-w-[3.25rem]">({platform.accountId})</span>
         )}
         <span className="opacity-50 text-[10px]">↗</span>
       </a>
       {testResult === undefined ? (
-        <span className="text-xs text-[var(--text-muted)]">--</span>
+        <span className="inline-flex w-5 justify-end text-xs text-[var(--text-muted)]">--</span>
       ) : testResult === null ? (
-        <span className="text-xs text-[var(--text-muted)] animate-pulse">⏳</span>
+        <span className="inline-flex w-5 justify-end text-xs text-[var(--text-muted)] animate-pulse">⏳</span>
       ) : testResult.ok ? (
-        <span className="text-green-400 text-sm cursor-help" title={`${testResult.elapsed}ms${testResult.detail ? ' · ' + testResult.detail : testResult.reply ? ' · ' + testResult.reply : ''}`}>✅</span>
+        <span className="inline-flex w-5 justify-end text-green-400 text-sm cursor-help" title={`${testResult.elapsed}ms${testResult.detail ? ' · ' + testResult.detail : testResult.reply ? ' · ' + testResult.reply : ''}`}>✅</span>
       ) : (
-        <span className="text-red-400 text-sm cursor-help" title={testResult.error || ''}>❌</span>
+        <span className="inline-flex w-5 justify-end text-red-400 text-sm cursor-help" title={testResult.error || ''}>❌</span>
       )}
     </div>
   );
@@ -822,7 +823,6 @@ export default function Home() {
     if (!p?.id || !p.accessMode) continue;
     providerAccessModeMap[p.id] = p.accessMode;
   }
-
   return (
     <div className="p-3 max-w-6xl mx-auto">
       {/* 头部 */}

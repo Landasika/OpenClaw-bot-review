@@ -167,6 +167,81 @@ export const COOLER_SPRITE: SpriteData = (() => {
   ]
 })()
 
+/** Server rack: 32x32 (2 tiles wide, 2 tiles tall) */
+export const SERVER_RACK_SPRITE: SpriteData = (() => {
+  // Polished to match reference more closely:
+  // dual towers, vented top cap, layered front panels, dense cyan/green LED rows.
+  const BG = _
+  const FRAME = '#2C324B'
+  const EDGE = '#4B547E'
+  const TOP = '#626A94'
+  const PANEL = '#1B2238'
+  const SLOT = '#0E1425'
+  const SLOT_DIV = '#222B45'
+  const CYAN = '#27D5FF'
+  const CYAN_DIM = '#1B6B99'
+  const GREEN = '#63E46F'
+  const WHITE = '#DCE6F2'
+  const BASE = '#11182A'
+
+  const W = 32
+  const H = 32
+  const rows: string[][] = Array.from({ length: H }, () => Array.from({ length: W }, () => BG))
+
+  const px = (x: number, y: number, c: string) => {
+    if (x >= 0 && x < W && y >= 0 && y < H) rows[y][x] = c
+  }
+  const fill = (x: number, y: number, w: number, h: number, c: string) => {
+    for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) px(xx, yy, c)
+  }
+
+  const drawRack = (x0: number) => {
+    // Outer shell
+    fill(x0, 3, 14, 28, FRAME)
+    fill(x0 + 1, 4, 12, 25, EDGE)
+    fill(x0 + 2, 5, 10, 23, PANEL)
+
+    // Top cap with vents + tiny status pixel
+    fill(x0 + 2, 4, 10, 4, TOP)
+    fill(x0 + 3, 5, 2, 1, SLOT_DIV)
+    fill(x0 + 6, 5, 2, 1, SLOT_DIV)
+    fill(x0 + 9, 5, 2, 1, SLOT_DIV)
+    fill(x0 + 3, 6, 2, 1, SLOT)
+    fill(x0 + 6, 6, 2, 1, SLOT)
+    fill(x0 + 9, 6, 2, 1, SLOT)
+    px(x0 + 3, 4, WHITE)
+
+    // Rack units (8 rows)
+    let y = 9
+    for (let u = 0; u < 8; u++) {
+      fill(x0 + 2, y, 10, 2, SLOT)
+      fill(x0 + 2, y, 10, 1, SLOT_DIV) // divider strip
+      // LED bars
+      px(x0 + 3, y + 1, CYAN)
+      px(x0 + 4, y + 1, CYAN)
+      px(x0 + 5, y + 1, CYAN_DIM)
+      px(x0 + 7, y + 1, u % 2 === 0 ? CYAN : CYAN_DIM)
+      px(x0 + 8, y + 1, u % 3 === 0 ? CYAN : CYAN_DIM)
+      px(x0 + 10, y + 1, GREEN)
+      y += 2
+    }
+
+    // Bottom I/O + base
+    fill(x0 + 2, 25, 10, 2, SLOT)
+    px(x0 + 3, 26, CYAN_DIM)
+    px(x0 + 5, 26, CYAN_DIM)
+    px(x0 + 7, 26, CYAN_DIM)
+    px(x0 + 9, 26, CYAN_DIM)
+    fill(x0 + 1, 29, 12, 1, BASE)
+    fill(x0 + 2, 30, 2, 1, BASE)
+    fill(x0 + 10, 30, 2, 1, BASE)
+  }
+
+  drawRack(1)
+  drawRack(15)
+  return rows
+})()
+
 /** Whiteboard: 32x16 (2 tiles wide, 1 tile tall) — hangs on wall */
 export const WHITEBOARD_SPRITE: SpriteData = (() => {
   const F = '#AAAAAA'

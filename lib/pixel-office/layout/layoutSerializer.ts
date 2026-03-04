@@ -236,6 +236,12 @@ const RIGHT_WALL_STOOLS: ReadonlyArray<PlacedFurniture> = [
   { uid: 'stool-r7', type: FurnitureType.BENCH, col: 17, row: 6 },
   { uid: 'stool-r8', type: FurnitureType.BENCH, col: 17, row: 7.5 },
 ]
+const LEFT_WALL_SERVER: Readonly<PlacedFurniture> = {
+  uid: 'server-b-left',
+  type: FurnitureType.SERVER_RACK,
+  col: 1,
+  row: 12,
+}
 
 function shouldRemoveRightOfficeLegacyItems(item: PlacedFurniture): boolean {
   if (item.uid.startsWith('stool-r')) return true
@@ -252,6 +258,9 @@ function normalizeRightOfficeFurniture(furniture: PlacedFurniture[]): PlacedFurn
   for (const stool of RIGHT_WALL_STOOLS) {
     const exists = next.some((item) => item.uid === stool.uid)
     if (!exists) next.push({ ...stool })
+  }
+  if (!next.some((item) => item.uid === LEFT_WALL_SERVER.uid)) {
+    next.push({ ...LEFT_WALL_SERVER })
   }
   return next
 }
@@ -357,6 +366,7 @@ export function createDefaultLayout(): OfficeLayout {
 
     // ── Bottom lounge / break area ──
     { uid: 'fridge-b', type: FurnitureType.FRIDGE, col: 1, row: 9.5 },
+    { ...LEFT_WALL_SERVER },
     { uid: 'water-cooler-b', type: FurnitureType.WATER_COOLER, col: 8, row: 9.5 },
     { uid: 'deco-b', type: FurnitureType.DECO_3, col: 9, row: 9.5 },
     { uid: 'plant-b1', type: FurnitureType.PLANT, col: 1, row: 15 },

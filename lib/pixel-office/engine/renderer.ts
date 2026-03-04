@@ -229,6 +229,7 @@ export function renderScene(
   hoveredAgentId: number | null,
   contributions?: ContributionData,
   photograph?: HTMLImageElement,
+  gatewayHealthy?: boolean,
 ): void {
   const drawables: ZDrawable[] = []
   const laptopSizeScale = 0.7
@@ -309,6 +310,57 @@ export function renderScene(
           c.drawImage(cached, fx, fy)
         },
       })
+
+      // Server alarm beacon (top of the server rack in the lounge left wall).
+      if (f.uid === 'server-b-left') {
+        const healthy = gatewayHealthy !== false
+        const now = Date.now()
+        const healthyPulse = (Math.sin(now / 900) + 1) / 2
+        const unhealthyPulse = (Math.sin(now / 120) + 1) / 2
+        const blinkAlpha = healthy
+          ? (0.55 + healthyPulse * 0.4) // slow breathing blink
+          : (0.15 + unhealthyPulse * 0.85) // fast urgent blink
+        drawables.push({
+          zY: f.zY + 0.15,
+          draw: (c) => {
+            const lampX = Math.round(fx + 15 * zoom)
+            const lampTopY = Math.round(fy + 1 * zoom)
+            const lampW = Math.max(3, Math.round(3.6 * zoom))
+            const lampH = Math.max(2, Math.round(2.2 * zoom))
+            const stemW = Math.max(1, Math.round(1.1 * zoom))
+            const stemH = Math.max(1, Math.round(1.4 * zoom))
+            const baseW = Math.max(2, Math.round(2.6 * zoom))
+            const baseH = Math.max(1, Math.round(1.1 * zoom))
+            const lampLeft = Math.round(lampX - lampW / 2)
+            const stemLeft = Math.round(lampX - stemW / 2)
+            const stemTop = lampTopY + lampH
+            const baseLeft = Math.round(lampX - baseW / 2)
+            const baseTop = stemTop + stemH
+            c.save()
+            c.globalAlpha = blinkAlpha
+            // Lamp cover (pixel warning light, not a sphere)
+            c.fillStyle = '#2B2F45'
+            c.fillRect(lampLeft - 1, lampTopY - 1, lampW + 2, lampH + 2)
+            c.fillStyle = healthy ? '#63E46F' : '#F25F5C'
+            c.fillRect(lampLeft, lampTopY, lampW, lampH)
+            // Lamp stem + base
+            c.fillStyle = '#3A425E'
+            c.fillRect(stemLeft, stemTop, stemW, stemH)
+            c.fillRect(baseLeft, baseTop, baseW, baseH)
+            // Pixel glow bands to keep a lamp-like look (avoid spherical aura)
+            const glowOuter = Math.max(8, Math.round(8.4 * zoom))
+            const glowMid = Math.max(5, Math.round(5.8 * zoom))
+            const glowInner = Math.max(3, Math.round(3.4 * zoom))
+            c.fillStyle = healthy ? 'rgba(99,228,111,0.14)' : 'rgba(242,95,92,0.2)'
+            c.fillRect(lampX - glowOuter, lampTopY - glowOuter, glowOuter * 2, glowOuter * 2)
+            c.fillStyle = healthy ? 'rgba(99,228,111,0.2)' : 'rgba(242,95,92,0.28)'
+            c.fillRect(lampX - glowMid, lampTopY - glowMid, glowMid * 2, glowMid * 2)
+            c.fillStyle = healthy ? 'rgba(99,228,111,0.28)' : 'rgba(242,95,92,0.35)'
+            c.fillRect(lampX - glowInner, lampTopY - glowInner, glowInner * 2, glowInner * 2)
+            c.restore()
+          },
+        })
+      }
     }
   }
 
@@ -923,6 +975,7 @@ export function renderFrame(
   bugs?: BugEntity[],
   contributions?: ContributionData,
   photograph?: HTMLImageElement,
+  gatewayHealthy?: boolean,
 ): { offsetX: number; offsetY: number } {
   // Clear
   ctx.clearRect(0, 0, canvasWidth, canvasHeight)
@@ -960,7 +1013,7 @@ export function renderFrame(
   // Draw walls + furniture + characters (z-sorted)
   const selectedId = selection?.selectedAgentId ?? null
   const hoveredId = selection?.hoveredAgentId ?? null
-  renderScene(ctx, allFurniture, characters, offsetX, offsetY, zoom, selectedId, hoveredId, contributions, photograph)
+  renderScene(ctx, allFurniture, characters, offsetX, offsetY, zoom, selectedId, hoveredId, contributions, photograph, gatewayHealthy)
 
   // Speech bubbles (always on top of characters)
   renderBubbles(ctx, characters, offsetX, offsetY, zoom)

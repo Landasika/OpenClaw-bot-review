@@ -173,6 +173,7 @@ const CODE_SNIPPET_LIFETIME_SEC = 5.5
 const FLOATING_TICK_INTERVAL_DESKTOP_MS = 48
 const FLOATING_TICK_INTERVAL_MOBILE_MS = 32
 const AGENT_ACTIVITY_POLL_INTERVAL_MS = 1000
+const GATEWAY_HEALTH_POLL_INTERVAL_MS = 10000
 
 let cachedOfficeState: OfficeState | null = null
 let cachedEditorState: EditorState | null = null
@@ -206,6 +207,7 @@ export default function PixelOfficePage() {
   const contributionsRef = useRef<ContributionData | null>(null)
   const photographRef = useRef<HTMLImageElement | null>(null)
   const gatewayRef = useRef<{ port: number; token?: string; host?: string }>({ port: 18789 })
+  const gatewayHealthyRef = useRef<boolean>(true)
   const providersRef = useRef<Array<{ id: string; api: string; models: Array<{ id: string; name: string; contextWindow?: number }>; usedBy: Array<{ id: string; emoji: string; name: string }> }>>([])
   const [isEditMode, setIsEditMode] = useState(cachedIsEditMode)
   const [soundOn, setSoundOn] = useState(true)
@@ -425,7 +427,8 @@ export default function PixelOfficePage() {
           { selectedAgentId: null, hoveredAgentId, hoveredTile: null, seats: office.seats, characters: office.characters },
           editorRender, office.layout.tileColors, office.layout.cols, office.layout.rows,
           undefined,
-          contributionsRef.current ?? undefined, photographRef.current ?? undefined)
+          contributionsRef.current ?? undefined, photographRef.current ?? undefined,
+          gatewayHealthyRef.current)
 
         // Collect photo comment positions for DOM rendering
         const zoom = zoomRef.current
@@ -638,6 +641,22 @@ export default function PixelOfficePage() {
     }
     fetchStats()
     const interval = setInterval(fetchStats, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Poll gateway health for server alarm lamp in Pixel Office
+  useEffect(() => {
+    const fetchGatewayHealth = async () => {
+      try {
+        const res = await fetch('/api/gateway-health', { cache: 'no-store' })
+        const data = await res.json()
+        gatewayHealthyRef.current = !!data?.ok
+      } catch {
+        gatewayHealthyRef.current = false
+      }
+    }
+    fetchGatewayHealth()
+    const interval = setInterval(fetchGatewayHealth, GATEWAY_HEALTH_POLL_INTERVAL_MS)
     return () => clearInterval(interval)
   }, [])
 

@@ -117,6 +117,7 @@ export const FurnitureType = {
   PAINTING_SMALL_1: 'ts_painting_small_1',
   PAINTING_SMALL_2: 'ts_painting_small_2',
   PAINTING_SMALL_3: 'ts_painting_small_3',
+  SERVER_RACK: 'server_rack',
   PHONE: 'phone',
   SOFA: 'sofa',
   COFFEE: 'coffee',

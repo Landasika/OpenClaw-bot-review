@@ -239,6 +239,11 @@ export default function PixelOfficePage() {
   const [versionLoading, setVersionLoading] = useState(false)
   const [versionLoadFailed, setVersionLoadFailed] = useState(false)
   const [showIdleRank, setShowIdleRank] = useState(false)
+  const selectedAgentOpenedAtRef = useRef(0)
+  const tokenRankOpenedAtRef = useRef(0)
+  const modelPanelOpenedAtRef = useRef(0)
+  const fullscreenPhotoOpenedAtRef = useRef(0)
+  const [subagentCreatorInfo, setSubagentCreatorInfo] = useState<{ parentAgentId: string; x: number; y: number } | null>(null)
   const [serverTooltip, setServerTooltip] = useState<{ open: boolean; x: number; y: number }>({ open: false, x: 0, y: 0 })
   const idleRankRef = useRef<Array<{ agentId: string; onlineMinutes: number; activeMinutes: number; idleMinutes: number; idlePercent: number }> | null>(null)
   const floatingCommentsRef = useRef<Array<{ key: string; text: string; x: number; y: number; opacity: number }>>([])
@@ -977,6 +982,7 @@ export default function PixelOfficePage() {
     if (!editor.isEditMode) {
       // Non-edit mode: check camera click or character click
       if (e.button === 0) {
+        setSubagentCreatorInfo(null)
         const rect = canvasRef.current.getBoundingClientRect()
         const clickX = e.clientX - rect.left
         const clickY = e.clientY - rect.top
@@ -1026,6 +1032,7 @@ export default function PixelOfficePage() {
                  tileY >= f.row && tileY < f.row + entry.footprintH
         })) {
           // Click on right bookshelf — show model panel
+          modelPanelOpenedAtRef.current = performance.now()
           setShowModelPanel(true)
         } else if (office.layout.furniture.some(f => {
           if (f.uid !== 'whiteboard-r') return false
@@ -1035,6 +1042,7 @@ export default function PixelOfficePage() {
                  tileY >= f.row && tileY < f.row + entry.footprintH
         })) {
           // Click on right whiteboard — show token ranking
+          tokenRankOpenedAtRef.current = performance.now()
           setShowTokenRank(true)
         } else if (office.layout.furniture.some(f => {
           if (f.uid !== 'clock-r') return false
@@ -1076,6 +1084,7 @@ export default function PixelOfficePage() {
           void refreshGatewayHealthSnapshot()
         } else if (photographRef.current && tileX >= 10 && tileX < 17 && tileY >= -0.5 && tileY < 1) {
           // Click on wall photograph — fullscreen view
+          fullscreenPhotoOpenedAtRef.current = performance.now()
           setFullscreenPhoto(true)
         } else if (contributionsRef.current && contributionsRef.current.username !== 'mock' && tileX >= 1 && tileX < 10 && tileY >= -0.5 && tileY < 1) {
           // Click on GitHub contribution heatmap — open profile
@@ -1091,12 +1100,35 @@ export default function PixelOfficePage() {
             let found = false
             for (const [aid, cid] of map.entries()) {
               if (cid === charId) {
+                selectedAgentOpenedAtRef.current = performance.now()
                 setSelectedAgentId(aid)
                 found = true
                 break
               }
             }
-            if (!found) setSelectedAgentId(null)
+            if (!found) {
+              const clickedCh = office.characters.get(charId)
+              if (clickedCh?.systemRoleType === 'gateway_sre' && isMobileViewport) {
+                setServerTooltip({ open: true, x: clickX, y: clickY })
+                void refreshGatewayHealthSnapshot()
+              } else if (clickedCh?.isSubagent && clickedCh.parentAgentId != null) {
+                let parentAgentId: string | null = null
+                for (const [aid, cid] of map.entries()) {
+                  if (cid === clickedCh.parentAgentId) {
+                    parentAgentId = aid
+                    break
+                  }
+                }
+                if (parentAgentId && isMobileViewport) {
+                  setSubagentCreatorInfo({
+                    parentAgentId,
+                    x: clickX,
+                    y: clickY,
+                  })
+                }
+              }
+              setSelectedAgentId(null)
+            }
           } else {
             setSelectedAgentId(null)
           }
@@ -1319,13 +1351,17 @@ export default function PixelOfficePage() {
         setShowModelPanel(false)
         return
       }
+      if (subagentCreatorInfo) {
+        setSubagentCreatorInfo(null)
+        return
+      }
       if (selectedAgentId) {
         setSelectedAgentId(null)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [fullscreenPhoto, isEditMode, selectedAgentId, showActivityHeatmap, showIdleRank, showModelPanel, showPhonePanel, showTokenRank])
+  }, [fullscreenPhoto, isEditMode, selectedAgentId, showActivityHeatmap, showIdleRank, showModelPanel, showPhonePanel, showTokenRank, subagentCreatorInfo])
 
   // ── Editor toolbar callbacks ──────────────────────────────────
   const handleToolChange = useCallback((tool: EditTool) => {
@@ -1686,7 +1722,7 @@ export default function PixelOfficePage() {
         )}
 
         {/* Server click tooltip */}
-        {serverTooltip.open && !isEditMode && !selectedAgentId && !isMobileViewport && (() => {
+        {serverTooltip.open && !isEditMode && !selectedAgentId && (() => {
           const snapshot = gatewaySreRef.current
           const status = snapshot.status === 'healthy' || snapshot.status === 'degraded' || snapshot.status === 'down'
             ? snapshot.status
@@ -1696,10 +1732,12 @@ export default function PixelOfficePage() {
             : status === 'degraded' ? 'text-yellow-400'
             : status === 'down' ? 'text-red-400'
             : 'text-[var(--text-muted)]'
+          const tooltipLeft = Math.max(8, Math.min(serverTooltip.x + 12, (containerRef.current?.clientWidth || 300) - (isMobileViewport ? 220 : 200)))
+          const tooltipTop = Math.max(8, serverTooltip.y + 12)
           return (
             <div
               className="absolute pointer-events-auto z-10 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--card)]/95 backdrop-blur-sm text-xs shadow-lg"
-              style={{ left: Math.min(serverTooltip.x + 12, (containerRef.current?.clientWidth || 300) - 200), top: serverTooltip.y + 12 }}
+              style={{ left: tooltipLeft, top: tooltipTop }}
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
             >
@@ -1743,7 +1781,13 @@ export default function PixelOfficePage() {
             : stats.todayAvgResponseMs > 30000 ? 'text-yellow-400'
             : 'text-green-400' : 'text-[var(--text-muted)]'
           return (
-            <div className={modalOverlayClass} onClick={() => setSelectedAgentId(null)}>
+            <div
+              className={modalOverlayClass}
+              onClick={() => {
+                if (isMobileViewport && performance.now() - selectedAgentOpenedAtRef.current < 280) return
+                setSelectedAgentId(null)
+              }}
+            >
               <div className={modalPanelClass("w-72", "max-h-[78%]")} onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
@@ -1770,9 +1814,46 @@ export default function PixelOfficePage() {
           )
         })()}
 
+        {/* Mobile subagent creator tooltip */}
+        {subagentCreatorInfo && !isEditMode && isMobileViewport && (() => {
+          const tooltipLeft = Math.max(8, Math.min(subagentCreatorInfo.x + 12, (containerRef.current?.clientWidth || 300) - 220))
+          const tooltipTop = Math.max(8, subagentCreatorInfo.y + 12)
+          return (
+            <div
+              className="absolute pointer-events-auto z-10 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--card)]/95 backdrop-blur-sm text-xs shadow-lg"
+              style={{ left: tooltipLeft, top: tooltipTop }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="absolute right-1.5 top-1.5 text-[10px] leading-none text-[var(--text-muted)] hover:text-[var(--text)]"
+                onClick={() => setSubagentCreatorInfo(null)}
+                aria-label={t('common.close')}
+                title={t('common.close')}
+              >
+                ×
+              </button>
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <span>🧑‍🔧</span>
+                <span className="font-semibold text-[var(--text)]">临时工来源</span>
+              </div>
+              <div className="space-y-0.5 text-[var(--text-muted)]">
+                <div>{subagentCreatorInfo.parentAgentId} agent创建的subagent</div>
+              </div>
+            </div>
+          )
+        })()}
+
         {/* Model panel (bookshelf click) */}
         {showModelPanel && !isEditMode && (
-          <div className={modalOverlayClass} onClick={() => setShowModelPanel(false)}>
+          <div
+            className={modalOverlayClass}
+            onClick={() => {
+              if (isMobileViewport && performance.now() - modelPanelOpenedAtRef.current < 280) return
+              setShowModelPanel(false)
+            }}
+          >
             <div className={modalPanelClass("w-80")} onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-3">
                 <span className="font-semibold text-[var(--text)]">📚 {t('models.title')}</span>
@@ -1816,8 +1897,13 @@ export default function PixelOfficePage() {
             .map(a => ({ ...a, tokens: agentStatsRef.current.get(a.agentId)?.totalTokens || 0 }))
             .sort((a, b) => b.tokens - a.tokens)
           const maxTokens = ranked[0]?.tokens || 1
+          const handleCloseTokenRankOverlay = () => {
+            // Prevent the opening tap from immediately closing the modal on mobile.
+            if (isMobileViewport && performance.now() - tokenRankOpenedAtRef.current < 280) return
+            setShowTokenRank(false)
+          }
           return (
-            <div className={modalOverlayClass} onClick={() => setShowTokenRank(false)}>
+            <div className={modalOverlayClass} onClick={handleCloseTokenRankOverlay}>
               <div className={modalPanelClass("w-80", "max-h-[78%]")} onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between mb-3">
                   <span className="font-semibold text-[var(--text)]">📊 Token {t('agent.tokenUsage')}</span>
@@ -1863,7 +1949,7 @@ export default function PixelOfficePage() {
           const svgH = topPad + 7 * (cellSize + gap)
           return (
             <div className={modalOverlayClass} onClick={() => setShowActivityHeatmap(false)}>
-              <div className={modalPanelClass("w-[min(94vw,56rem)]", "max-h-[85%]")} onClick={e => e.stopPropagation()}>
+              <div className={modalPanelClass("w-fit max-w-[94vw]", "max-h-[85%]")} onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between mb-3">
                   <span className="font-semibold text-[var(--text)]">🕐 {t('pixelOffice.heatmap.title')}</span>
                   <button onClick={() => setShowActivityHeatmap(false)} className="text-[var(--text-muted)] hover:text-[var(--text)] text-lg leading-none">×</button>
@@ -2000,7 +2086,13 @@ export default function PixelOfficePage() {
 
         {/* Fullscreen photograph viewer */}
         {fullscreenPhoto && photographRef.current && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/80 cursor-pointer" onClick={() => setFullscreenPhoto(false)}>
+          <div
+            className="absolute inset-0 z-30 flex items-center justify-center bg-black/80 cursor-pointer"
+            onClick={() => {
+              if (isMobileViewport && performance.now() - fullscreenPhotoOpenedAtRef.current < 280) return
+              setFullscreenPhoto(false)
+            }}
+          >
             <img src={photographRef.current.src} alt="photograph" className="max-w-[90%] max-h-[90%] object-contain rounded-lg shadow-2xl" />
             <button onClick={() => setFullscreenPhoto(false)} className="absolute top-4 right-4 text-white/70 hover:text-white text-2xl leading-none">×</button>
           </div>

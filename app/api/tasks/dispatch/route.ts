@@ -3,9 +3,12 @@ import { taskStore } from "@/lib/task-store";
 import {
   dispatchTaskToAgent,
   autoDispatchPendingTasks,
-  dispatchMultipleTasks,
 } from "@/lib/task-scheduler";
 import { getSystemConfig } from "@/lib/system-config";
+import {
+  evaluateTaskDependencies,
+  loadTaskMap,
+} from "@/lib/task-dependency";
 
 // POST /api/tasks/dispatch - 调度单个任务
 export async function POST(req: Request) {
@@ -46,11 +49,49 @@ export async function POST(req: Request) {
       );
     }
 
+    const taskMap = await loadTaskMap();
+    taskMap.set(task.id, task);
+
+    if (task.status === "blocked") {
+      const dependencyCheck = evaluateTaskDependencies(task, taskMap);
+      if (!dependencyCheck.satisfied) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: task.blockedReason || dependencyCheck.blockedReason || "Task is blocked by dependencies",
+          },
+          { status: 400 }
+        );
+      }
+
+      await taskStore.updateTask(task.id, {
+        status: "assigned",
+        blockedReason: undefined,
+      });
+      task.status = "assigned";
+    }
+
     if (task.status !== "assigned") {
       return NextResponse.json(
         {
           success: false,
           error: `Task status is ${task.status}, cannot dispatch`
+        },
+        { status: 400 }
+      );
+    }
+
+    const dependencyCheck = evaluateTaskDependencies(task, taskMap);
+    if (!dependencyCheck.satisfied) {
+      await taskStore.updateTask(task.id, {
+        status: "blocked",
+        blockedReason: dependencyCheck.blockedReason,
+      });
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: dependencyCheck.blockedReason,
         },
         { status: 400 }
       );
@@ -87,12 +128,14 @@ export async function GET() {
   try {
     // 获取待调度的任务统计
     const assignedTasks = await taskStore.listTasks({ status: "assigned" });
+    const blockedTasks = await taskStore.listTasks({ status: "blocked" });
     const inProgressTasks = await taskStore.listTasks({ status: "in_progress" });
 
     return NextResponse.json({
       success: true,
       stats: {
         pending: assignedTasks.length,
+        blocked: blockedTasks.length,
         inProgress: inProgressTasks.length,
       },
       pendingTasks: assignedTasks.map(t => ({

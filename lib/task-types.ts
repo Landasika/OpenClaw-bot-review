@@ -2,7 +2,7 @@
  * 任务管理系统数据类型定义
  */
 
-export type TaskStatus = "pending" | "assigned" | "in_progress" | "submitted" | "approved" | "rejected" | "cancelled";
+export type TaskStatus = "pending" | "assigned" | "blocked" | "in_progress" | "submitted" | "approved" | "rejected" | "cancelled";
 
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
 
@@ -31,7 +31,8 @@ export interface Task {
   reviewScore?: number; // 1-5分
 
   // 任务关联
-  parentTaskId?: string; // 如果是因任务未完成而创建的子任务
+  dependsOnTaskIds?: string[]; // 任务依赖：只有依赖任务全部 approved 才可执行
+  blockedReason?: string; // 当状态为 blocked 时，记录阻塞原因
   relatedTaskId?: string; // 关联的其他任务
 
   // 元数据
@@ -48,7 +49,7 @@ export interface CreateTaskRequest {
   dueDate?: number;
   tags?: string[];
   estimatedHours?: number;
-  parentTaskId?: string;
+  dependsOnTaskIds?: string[];
 }
 
 export interface AssignTaskRequest {
@@ -77,6 +78,7 @@ export interface TaskListQuery {
   status?: TaskStatus;
   assignedTo?: string;
   createdBy?: string;
+  dependsOnTaskId?: string;
   priority?: TaskPriority;
   limit?: number;
   offset?: number;

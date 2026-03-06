@@ -24,6 +24,12 @@ const TEMP_WORKER_LABEL = '临时工'
 /** Track previous agent states to detect offline→working transitions */
 const prevAgentStates = new Map<string, string>()
 
+function isBossAgent(activity: AgentActivity): boolean {
+  const agentId = (activity.agentId || '').toLowerCase()
+  const name = (activity.name || '').toLowerCase()
+  return agentId.includes('boss') || name.includes('boss') || (activity.name || '').includes('老板')
+}
+
 export function syncAgentsToOffice(
   activities: AgentActivity[],
   office: OfficeState,
@@ -70,6 +76,7 @@ export function syncAgentsToOffice(
     if (ch) {
       ch.label = activity.name || activity.agentId
     }
+    office.setAgentBoss(charId, isBossAgent(activity))
 
     switch (activity.state) {
       case 'working':

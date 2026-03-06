@@ -83,5 +83,53 @@
     "agent-osadmin": "osadmin",
     "agent-coder": "coder",
     "agent-docmanager": "docmanager"
+  },
+  "feishuBots": {
+    "boss": {
+      "name": "Boss",
+      "appId": "cli_replace_with_boss_app_id",
+      "appSecret": "replace_with_boss_app_secret"
+    },
+    "searcher": {
+      "name": "Searcher",
+      "appId": "cli_replace_with_searcher_app_id",
+      "appSecret": "replace_with_searcher_app_secret"
+    },
+    "osadmin": {
+      "name": "OSAdmin",
+      "appId": "cli_replace_with_osadmin_app_id",
+      "appSecret": "replace_with_osadmin_app_secret"
+    },
+    "coder": {
+      "name": "Coder",
+      "appId": "cli_replace_with_coder_app_id",
+      "appSecret": "replace_with_coder_app_secret"
+    },
+    "docmanager": {
+      "name": "DocManager",
+      "appId": "cli_replace_with_docmanager_app_id",
+      "appSecret": "replace_with_docmanager_app_secret"
+    }
+  },
+  "meetingEnabled": false,
+  "meetingDailyTime": "09:30",
+  "meetingTimezone": "Asia/Shanghai",
+  "meetingParticipants": [
+    "agent-searcher",
+    "agent-osadmin",
+    "agent-coder",
+    "agent-docmanager"
+  ],
+  "meetingDiscussionStatuses": [
+    "pending",
+    "assigned",
+    "blocked",
+    "in_progress",
+    "rejected"
+  ],
+  "meetingPromptFiles": {
+    "kickoff": "meeting-kickoff.md",
+    "employee": "meeting-employee.md",
+    "summary": "meeting-summary.md"
   }
 }

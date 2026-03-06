@@ -65,6 +65,7 @@ export function createCharacter(
   const center = tileCenter(col, row)
   return {
     id,
+    isBoss: false,
     state: CharacterState.TYPE,
     dir: seat ? seat.facingDir : Direction.DOWN,
     x: center.x,

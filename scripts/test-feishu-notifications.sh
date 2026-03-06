@@ -128,7 +128,7 @@ if [ -n "$FOLLOW_UP_ID" ]; then
 
   read -p "按Enter键通过改进任务..."
 
-  curl -s -X POST "$API_BASE/api/tasks/$FOLLOW_UP_ID/dispatch" \
+  curl -s -X POST "$API_BASE/api/tasks/dispatch" \
     -H "Content-Type: application/json" \
     -d "{\"taskId\": \"$FOLLOW_UP_ID\"}" > /dev/null
 

@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import type { Task } from "../../lib/task-types";
-import { TaskSchedulerControl } from "../task-scheduler-control";
 
 interface SystemConfigData {
   availableAgents?: string[];
@@ -17,6 +16,10 @@ export default function TasksPage() {
   const [filter, setFilter] = useState<string>("all");
   const [availableAgents, setAvailableAgents] = useState<string[]>([]);
   const [agentDisplayNameMap, setAgentDisplayNameMap] = useState<Record<string, string>>({});
+  const [allTasksForDependency, setAllTasksForDependency] = useState<Task[]>([]);
+  const [dependencyDraft, setDependencyDraft] = useState<string[]>([]);
+  const [dependencySaving, setDependencySaving] = useState(false);
+  const [dependencyMessage, setDependencyMessage] = useState<string | null>(null);
 
   // 新任务表单
   const [newTask, setNewTask] = useState({
@@ -25,6 +28,7 @@ export default function TasksPage() {
     priority: "medium" as "low" | "medium" | "high" | "urgent",
     assignedTo: "",
     dueDate: "",
+    dependsOnTaskIds: [] as string[],
   });
 
   // 审查表单
@@ -40,6 +44,11 @@ export default function TasksPage() {
   useEffect(() => {
     loadTasks();
   }, [filter]);
+
+  useEffect(() => {
+    setDependencyDraft(selectedTask?.dependsOnTaskIds || []);
+    setDependencyMessage(null);
+  }, [selectedTask?.id]);
 
   useEffect(() => {
     fetch("/api/system-config")
@@ -58,10 +67,20 @@ export default function TasksPage() {
       const url = filter === "all"
         ? "/api/tasks"
         : `/api/tasks?status=${filter}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.success) {
-        setTasks(data.tasks);
+      const [filteredRes, allRes] = await Promise.all([
+        fetch(url),
+        fetch("/api/tasks"),
+      ]);
+      const [filteredData, allData] = await Promise.all([
+        filteredRes.json(),
+        allRes.json(),
+      ]);
+
+      if (filteredData.success) {
+        setTasks(filteredData.tasks);
+      }
+      if (allData.success) {
+        setAllTasksForDependency(allData.tasks);
       }
     } catch (error) {
       console.error("Failed to load tasks:", error);
@@ -77,6 +96,7 @@ export default function TasksPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...newTask,
+          dependsOnTaskIds: newTask.dependsOnTaskIds,
           dueDate: newTask.dueDate ? new Date(newTask.dueDate).getTime() : undefined,
         }),
       });
@@ -89,8 +109,11 @@ export default function TasksPage() {
           priority: "medium",
           assignedTo: "",
           dueDate: "",
+          dependsOnTaskIds: [],
         });
         loadTasks();
+      } else {
+        alert(data.error || "创建任务失败");
       }
     } catch (error) {
       console.error("Failed to create task:", error);
@@ -138,6 +161,34 @@ export default function TasksPage() {
     }
   };
 
+  const saveDependencies = async () => {
+    if (!selectedTask) {
+      return;
+    }
+
+    setDependencySaving(true);
+    setDependencyMessage(null);
+    try {
+      const res = await fetch(`/api/tasks/${selectedTask.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dependsOnTaskIds: dependencyDraft }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "更新依赖失败");
+      }
+      setSelectedTask(data.task);
+      setDependencyDraft(data.task.dependsOnTaskIds || []);
+      setDependencyMessage("依赖已更新");
+      await loadTasks();
+    } catch (error: any) {
+      setDependencyMessage(error.message || "更新依赖失败");
+    } finally {
+      setDependencySaving(false);
+    }
+  };
+
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
       pending: "bg-gray-100 text-gray-800",
@@ -146,6 +197,7 @@ export default function TasksPage() {
       submitted: "bg-purple-100 text-purple-800",
       approved: "bg-green-100 text-green-800",
       rejected: "bg-red-100 text-red-800",
+      blocked: "bg-orange-100 text-orange-800",
       cancelled: "bg-gray-100 text-gray-800",
     };
     return colors[status] || "bg-gray-100 text-gray-800";
@@ -160,6 +212,10 @@ export default function TasksPage() {
     };
     return colors[priority] || "bg-gray-200 text-gray-700";
   };
+
+  const taskMap = useMemo(() => {
+    return new Map(allTasksForDependency.map((task) => [task.id, task]));
+  }, [allTasksForDependency]);
 
   if (loading) {
     return <div className="p-8 text-center">Loading...</div>;
@@ -177,14 +233,9 @@ export default function TasksPage() {
         </button>
       </div>
 
-      {/* 任务调度器控制 */}
-      <div className="mb-6">
-        <TaskSchedulerControl />
-      </div>
-
       {/* 筛选器 */}
       <div className="mb-6 flex gap-2">
-        {["all", "pending", "assigned", "in_progress", "submitted", "approved", "rejected"].map((status) => (
+        {["all", "pending", "assigned", "blocked", "in_progress", "submitted", "approved", "rejected"].map((status) => (
           <button
             key={status}
             onClick={() => setFilter(status)}
@@ -200,37 +251,55 @@ export default function TasksPage() {
       </div>
 
       {/* 任务列表 */}
-      <div className="space-y-4">
-        {tasks.map((task) => (
-          <div
-            key={task.id}
-            className="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow cursor-pointer"
-            onClick={() => setSelectedTask(task)}
-          >
-            <div className="flex justify-between items-start">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <h3 className="text-lg font-semibold">{task.title}</h3>
-                  <span className={`px-2 py-1 rounded text-xs ${getPriorityColor(task.priority)}`}>
-                    {task.priority}
-                  </span>
-                  <span className={`px-2 py-1 rounded text-xs ${getStatusColor(task.status)}`}>
-                    {task.status}
-                  </span>
-                </div>
-                <p className="text-gray-600 text-sm mb-2">{task.description}</p>
-                <div className="flex items-center gap-4 text-xs text-gray-500">
-                  <span>创建: {new Date(task.createdAt).toLocaleString("zh-CN")}</span>
-                  {task.assignedTo && <span>分配给: {task.assignedTo}</span>}
-                  {task.dueDate && (
-                    <span>截止: {new Date(task.dueDate).toLocaleString("zh-CN")}</span>
-                  )}
-                </div>
+      {tasks.length === 0 ? (
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-8 text-center text-sm text-[var(--text-muted)]">
+          当前筛选下暂无任务
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {tasks.map((task) => (
+            <button
+              key={task.id}
+              type="button"
+              className="group rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 text-left transition-all hover:border-[var(--accent)]/50 hover:shadow-lg"
+              onClick={() => setSelectedTask(task)}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--text)]">
+                  {task.title}
+                </h3>
+                <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] ${getPriorityColor(task.priority)}`}>
+                  {task.priority}
+                </span>
               </div>
-            </div>
-          </div>
-        ))}
-      </div>
+
+              <p className="mt-1 h-8 overflow-hidden text-xs leading-4 text-[var(--text-muted)]">
+                {task.description || "无描述"}
+              </p>
+
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <span className={`rounded px-1.5 py-0.5 text-[11px] ${getStatusColor(task.status)}`}>
+                  {task.status}
+                </span>
+                <span className="rounded border border-[var(--border)] bg-[var(--bg)] px-1.5 py-0.5 text-[11px] text-[var(--text-muted)]">
+                  {task.assignedTo ? `👤 ${agentDisplayNameMap[task.assignedTo] || task.assignedTo}` : "👤 未分配"}
+                </span>
+              </div>
+
+              <div className="mt-2 space-y-0.5 text-[11px] text-[var(--text-muted)]">
+                <div>创建: {new Date(task.createdAt).toLocaleString("zh-CN")}</div>
+                {task.dueDate && <div>截止: {new Date(task.dueDate).toLocaleString("zh-CN")}</div>}
+              </div>
+
+              {task.status === "blocked" && task.blockedReason && (
+                <div className="mt-2 rounded border border-orange-300/40 bg-orange-100/70 px-1.5 py-0.5 text-[11px] text-orange-800">
+                  阻塞: {task.blockedReason}
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* 新建任务弹窗 */}
       {showAddTask && (
@@ -293,6 +362,27 @@ export default function TasksPage() {
                     className="w-full border rounded-lg px-3 py-2"
                   />
                 </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium mb-1">依赖任务（可多选）</label>
+                  <select
+                    multiple
+                    value={newTask.dependsOnTaskIds}
+                    onChange={(e) => {
+                      const values = Array.from(e.target.selectedOptions).map((option) => option.value);
+                      setNewTask({ ...newTask, dependsOnTaskIds: values });
+                    }}
+                    className="w-full border rounded-lg px-3 py-2 h-32"
+                  >
+                    {allTasksForDependency.map((task) => (
+                      <option key={task.id} value={task.id}>
+                        {task.title} ({task.status})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    按住 Ctrl/Cmd 可多选。只有依赖任务全部 approved 后，此任务才会被调度。
+                  </p>
+                </div>
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-6">
@@ -350,6 +440,72 @@ export default function TasksPage() {
                   <span className="ml-2">{selectedTask.createdBy}</span>
                 </div>
               </div>
+
+              <div>
+                <h3 className="font-medium mb-1">依赖任务</h3>
+                {selectedTask.dependsOnTaskIds && selectedTask.dependsOnTaskIds.length > 0 ? (
+                  <div className="space-y-1">
+                    {selectedTask.dependsOnTaskIds.map((depId) => {
+                      const depTask = taskMap.get(depId);
+                      const depStatus = depTask?.status || "missing";
+                      return (
+                        <div key={depId} className="text-sm text-gray-700 flex items-center gap-2">
+                          <span>{depTask?.title || depId}</span>
+                          <span className={`px-2 py-0.5 rounded text-xs ${getStatusColor(depStatus)}`}>
+                            {depStatus}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">无依赖任务</p>
+                )}
+              </div>
+
+              {(selectedTask.status === "pending" || selectedTask.status === "assigned" || selectedTask.status === "blocked") && (
+                <div className="border rounded p-3">
+                  <h3 className="font-medium mb-2">编辑依赖</h3>
+                  <select
+                    multiple
+                    value={dependencyDraft}
+                    onChange={(e) => {
+                      const values = Array.from(e.target.selectedOptions).map((option) => option.value);
+                      setDependencyDraft(values);
+                      setDependencyMessage(null);
+                    }}
+                    className="w-full border rounded-lg px-3 py-2 h-32"
+                  >
+                    {allTasksForDependency
+                      .filter((task) => task.id !== selectedTask.id)
+                      .map((task) => (
+                        <option key={task.id} value={task.id}>
+                          {task.title} ({task.status})
+                        </option>
+                      ))}
+                  </select>
+                  <div className="mt-3 flex items-center gap-2">
+                    <button
+                      onClick={saveDependencies}
+                      disabled={dependencySaving}
+                      className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm"
+                    >
+                      {dependencySaving ? "保存中..." : "保存依赖"}
+                    </button>
+                    {dependencyMessage && (
+                      <span className={`text-xs ${dependencyMessage.includes("失败") || dependencyMessage.includes("error") ? "text-red-600" : "text-green-600"}`}>
+                        {dependencyMessage}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {selectedTask.status === "blocked" && selectedTask.blockedReason && (
+                <div className="rounded bg-orange-50 border border-orange-200 p-3 text-sm text-orange-800">
+                  当前阻塞原因: {selectedTask.blockedReason}
+                </div>
+              )}
 
               <div>
                 <h3 className="font-medium mb-1">描述</h3>

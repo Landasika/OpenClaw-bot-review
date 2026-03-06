@@ -24,6 +24,15 @@ export async function POST(
         { status: 404 }
       );
     }
+    if (task.status !== "assigned" && task.status !== "in_progress") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Task status is ${task.status}, only assigned/in_progress can submit result`,
+        },
+        { status: 400 }
+      );
+    }
 
     const now = Date.now();
     const updated = await taskStore.updateTask(id, {

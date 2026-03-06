@@ -8,14 +8,44 @@ import * as FeishuNotifier from "./feishu-notifier";
 import path from "path";
 import type { Task, TaskStatus } from "./task-types";
 
-const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(process.env.HOME || "", ".openclaw");
-const TASKS_DIR = path.join(OPENCLAW_HOME, "tasks");
-const TASKS_INDEX_FILE = path.join(TASKS_DIR, "tasks.json");
+const PROJECT_ROOT = process.cwd();
+const TASKS_INDEX_FILE = path.join(PROJECT_ROOT, "data", "task.json");
+const TASKS_DIR = path.dirname(TASKS_INDEX_FILE);
+const LEGACY_TASKS_INDEX_FILES = [
+  path.join(PROJECT_ROOT, "data", "tasks", "tasks.json"),
+  path.join(process.env.OPENCLAW_HOME || path.join(process.env.HOME || "", ".openclaw"), "tasks", "tasks.json"),
+];
 
 export class TaskStore {
   private ensureDirs() {
     if (!fs.existsSync(TASKS_DIR)) {
       fs.mkdirSync(TASKS_DIR, { recursive: true });
+    }
+    this.migrateLegacyFileIfNeeded();
+  }
+
+  private migrateLegacyFileIfNeeded() {
+    // If the repository task file is empty/missing but legacy file exists, copy once.
+    const targetExists = fs.existsSync(TASKS_INDEX_FILE);
+    const targetSize = targetExists ? fs.statSync(TASKS_INDEX_FILE).size : 0;
+    if (targetExists && targetSize > 0) {
+      return;
+    }
+    for (const legacyFile of LEGACY_TASKS_INDEX_FILES) {
+      if (!fs.existsSync(legacyFile)) {
+        continue;
+      }
+      try {
+        const raw = fs.readFileSync(legacyFile, "utf-8");
+        if (!raw.trim()) {
+          continue;
+        }
+        JSON.parse(raw);
+        fs.writeFileSync(TASKS_INDEX_FILE, raw);
+        return;
+      } catch {
+        // try next legacy file
+      }
     }
   }
 
@@ -83,7 +113,7 @@ export class TaskStore {
     status?: TaskStatus;
     assignedTo?: string;
     createdBy?: string;
-    parentTaskId?: string;
+    dependsOnTaskId?: string;
   }): Promise<Task[]> {
     const index = this.getIndex();
     let tasks = Object.values(index);
@@ -98,8 +128,9 @@ export class TaskStore {
       if (filter.createdBy) {
         tasks = tasks.filter(t => t.createdBy === filter.createdBy);
       }
-      if (filter.parentTaskId !== undefined) {
-        tasks = tasks.filter(t => t.parentTaskId === filter.parentTaskId);
+      const dependsOnTaskId = filter.dependsOnTaskId;
+      if (dependsOnTaskId !== undefined) {
+        tasks = tasks.filter(t => (t.dependsOnTaskIds || []).includes(dependsOnTaskId));
       }
     }
 

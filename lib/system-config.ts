@@ -1,5 +1,11 @@
 import fs from "fs";
 import path from "path";
+import type { TaskStatus } from "./task-types";
+import {
+  DEFAULT_MEETING_DISCUSSION_STATUSES,
+  VALID_MEETING_DISCUSSION_STATUSES,
+} from "./meeting-types";
+import type { MeetingPromptFiles } from "./meeting-types";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -8,6 +14,12 @@ export interface AlertRuleConfig {
   name: string;
   enabled: boolean;
   threshold?: number;
+}
+
+export interface FeishuBotConfig {
+  name: string;
+  appId: string;
+  appSecret: string;
 }
 
 export interface SystemConfig {
@@ -37,6 +49,13 @@ export interface SystemConfig {
   feishuDefaultChatId: string;
   feishuBotScriptPath: string;
   feishuBotMap: Record<string, string>;
+  feishuBots: Record<string, FeishuBotConfig>;
+  meetingEnabled: boolean;
+  meetingDailyTime: string;
+  meetingTimezone: string;
+  meetingParticipants: string[];
+  meetingDiscussionStatuses: TaskStatus[];
+  meetingPromptFiles: MeetingPromptFiles;
   alertsDefaultRules: AlertRuleConfig[];
 }
 
@@ -77,6 +96,23 @@ const DEFAULT_SYSTEM_CONFIG: SystemConfig = {
   feishuBotScriptPath: "scripts/feishu_bot_send.py",
   feishuBotMap: {
     main: "boss",
+  },
+  feishuBots: {
+    boss: { name: "Boss", appId: "", appSecret: "" },
+    searcher: { name: "Searcher", appId: "", appSecret: "" },
+    osadmin: { name: "OSAdmin", appId: "", appSecret: "" },
+    coder: { name: "Coder", appId: "", appSecret: "" },
+    docmanager: { name: "DocManager", appId: "", appSecret: "" },
+  },
+  meetingEnabled: false,
+  meetingDailyTime: "09:30",
+  meetingTimezone: "Asia/Shanghai",
+  meetingParticipants: [],
+  meetingDiscussionStatuses: DEFAULT_MEETING_DISCUSSION_STATUSES,
+  meetingPromptFiles: {
+    kickoff: "meeting-kickoff.md",
+    employee: "meeting-employee.md",
+    summary: "meeting-summary.md",
   },
   alertsDefaultRules: [
     { id: "model_unavailable", name: "Model Unavailable", enabled: false },
@@ -128,12 +164,48 @@ function normalizeConfig(config: SystemConfig): SystemConfig {
   const feishuBotMap = Object.keys(config.feishuBotMap).length > 0
     ? config.feishuBotMap
     : { [defaultAgent]: "boss" };
+  const feishuBots = Object.keys(config.feishuBots || {}).length > 0
+    ? config.feishuBots
+    : DEFAULT_SYSTEM_CONFIG.feishuBots;
+  const meetingParticipants = Array.isArray(config.meetingParticipants)
+    ? config.meetingParticipants.filter((agentId) => typeof agentId === "string" && agentId.trim() !== "")
+    : [];
+  const meetingDiscussionStatuses = Array.isArray(config.meetingDiscussionStatuses)
+    ? config.meetingDiscussionStatuses.filter((status): status is TaskStatus =>
+      VALID_MEETING_DISCUSSION_STATUSES.includes(status)
+    )
+    : [];
+  const meetingPromptFiles = {
+    kickoff: typeof config.meetingPromptFiles?.kickoff === "string" && config.meetingPromptFiles.kickoff.trim() !== ""
+      ? config.meetingPromptFiles.kickoff
+      : DEFAULT_SYSTEM_CONFIG.meetingPromptFiles.kickoff,
+    employee: typeof config.meetingPromptFiles?.employee === "string" && config.meetingPromptFiles.employee.trim() !== ""
+      ? config.meetingPromptFiles.employee
+      : DEFAULT_SYSTEM_CONFIG.meetingPromptFiles.employee,
+    summary: typeof config.meetingPromptFiles?.summary === "string" && config.meetingPromptFiles.summary.trim() !== ""
+      ? config.meetingPromptFiles.summary
+      : DEFAULT_SYSTEM_CONFIG.meetingPromptFiles.summary,
+  };
+  const meetingDailyTime = typeof config.meetingDailyTime === "string" && /^([01]\d|2[0-3]):([0-5]\d)$/.test(config.meetingDailyTime)
+    ? config.meetingDailyTime
+    : DEFAULT_SYSTEM_CONFIG.meetingDailyTime;
+  const meetingTimezone = typeof config.meetingTimezone === "string" && config.meetingTimezone.trim() !== ""
+    ? config.meetingTimezone
+    : DEFAULT_SYSTEM_CONFIG.meetingTimezone;
 
   return {
     ...config,
     defaultAgent,
     availableAgents,
     feishuBotMap,
+    feishuBots,
+    meetingDailyTime,
+    meetingTimezone,
+    meetingParticipants,
+    meetingDiscussionStatuses: meetingDiscussionStatuses.length > 0
+      ? meetingDiscussionStatuses
+      : DEFAULT_MEETING_DISCUSSION_STATUSES,
+    meetingPromptFiles,
   };
 }
 
@@ -179,4 +251,18 @@ export function getDefaultAgentId(): string {
 export function resolveFeishuBotScriptPath(): string {
   const scriptPath = getSystemConfig().feishuBotScriptPath || "scripts/feishu_bot_send.py";
   return path.isAbsolute(scriptPath) ? scriptPath : path.join(process.cwd(), scriptPath);
+}
+
+export function updateSystemConfig(patch: Partial<SystemConfig>): SystemConfig {
+  const current = getSystemConfig({ forceRefresh: true });
+  const merged = normalizeConfig(deepMerge<SystemConfig>(current, patch));
+
+  const configDir = path.dirname(SYSTEM_CONFIG_PATH);
+  if (!fs.existsSync(configDir)) {
+    fs.mkdirSync(configDir, { recursive: true });
+  }
+
+  fs.writeFileSync(SYSTEM_CONFIG_PATH, `${JSON.stringify(merged, null, 2)}\n`, "utf-8");
+  cache = { ts: Date.now(), data: merged };
+  return merged;
 }

@@ -15,7 +15,7 @@ import {
 } from '@/lib/pixel-office/editor/editorActions'
 import type { ExpandDirection } from '@/lib/pixel-office/editor/editorActions'
 import { TILE_SIZE } from '@/lib/pixel-office/constants'
-import { TileType, EditTool } from '@/lib/pixel-office/types'
+import { TileType, EditTool, FurnitureType } from '@/lib/pixel-office/types'
 import type { TileType as TileTypeVal, FloorColor, OfficeLayout } from '@/lib/pixel-office/types'
 import { getCatalogEntry, isRotatable } from '@/lib/pixel-office/layout/furnitureCatalog'
 import { createDefaultLayout, migrateLayoutColors, serializeLayout } from '@/lib/pixel-office/layout/layoutSerializer'
@@ -163,7 +163,11 @@ function getLayoutContentBounds(layout: OfficeLayout): { minCol: number; maxCol:
   }
 }
 
-const DESKTOP_CANVAS_ZOOM = 2.5
+const DESKTOP_CANVAS_ZOOM = 3.1
+const DESKTOP_MIN_ZOOM = 0.8
+const DESKTOP_FIT_PADDING_PX = 8
+const DESKTOP_CONTENT_PADDING_TILES_X = 0.8
+const DESKTOP_CONTENT_PADDING_TILES_Y = 0.6
 const MOBILE_CANVAS_ZOOM = 1.9
 const MOBILE_MIN_ZOOM = 0.55
 const MOBILE_MAX_ZOOM = 6
@@ -174,6 +178,85 @@ const CODE_SNIPPET_LIFETIME_SEC = 5.5
 const FLOATING_TICK_INTERVAL_DESKTOP_MS = 48
 const FLOATING_TICK_INTERVAL_MOBILE_MS = 32
 const AGENT_ACTIVITY_POLL_INTERVAL_MS = 1000
+
+const BEAUTIFY_CORRIDOR_COLOR: FloorColor = { h: 36, s: 28, b: 19, c: 4 }
+const BEAUTIFY_WORKSPACE_COLOR: FloorColor = { h: 184, s: 30, b: 10, c: 6 }
+const BEAUTIFY_BOSS_COLOR: FloorColor = { h: 262, s: 44, b: -10, c: 8 }
+const BEAUTIFY_DOOR_COLOR: FloorColor = { h: 34, s: 22, b: 12, c: 4 }
+
+const BEAUTIFY_DECORATIONS: Array<{ uid: string; type: string; col: number; row: number }> = [
+  { uid: "whiteboard-r", type: FurnitureType.WHITEBOARD, col: 14, row: 1 },
+  { uid: "phone-r", type: FurnitureType.PHONE, col: 15, row: 3 },
+  { uid: "cooler-cor", type: FurnitureType.WATER_COOLER, col: 1, row: 2 },
+  { uid: "plant-work-a", type: FurnitureType.PLANT_SMALL, col: 4, row: 8 },
+  { uid: "plant-work-b", type: FurnitureType.PLANT_SMALL, col: 12, row: 8 },
+]
+
+function getBeautifiedTileColor(
+  tile: TileTypeVal,
+  col: number,
+  row: number,
+  rows: number,
+): FloorColor | null {
+  if (tile === TileType.WALL || tile === TileType.VOID) return null
+  if (tile === TileType.FLOOR_4) return BEAUTIFY_DOOR_COLOR
+
+  const base = col < 3
+    ? BEAUTIFY_CORRIDOR_COLOR
+    : col < 13
+      ? BEAUTIFY_WORKSPACE_COLOR
+      : BEAUTIFY_BOSS_COLOR
+  const depthShift = Math.round(((row / Math.max(1, rows - 1)) - 0.5) * 6)
+
+  return {
+    h: base.h,
+    s: base.s,
+    b: base.b + depthShift,
+    c: base.c,
+  }
+}
+
+function buildBeautifiedLayout(layout: OfficeLayout): OfficeLayout {
+  const tileColors = layout.tiles.map((tile, index) => {
+    const col = index % layout.cols
+    const row = Math.floor(index / layout.cols)
+    return getBeautifiedTileColor(tile, col, row, layout.rows)
+  })
+
+  let nextLayout: OfficeLayout = {
+    ...layout,
+    tileColors,
+    furniture: layout.furniture.filter((item) => item.type !== FurnitureType.SOFA),
+  }
+
+  const ensureDecoration = (uid: string, type: string, col: number, row: number) => {
+    if (nextLayout.furniture.some((item) => item.uid === uid)) return
+    if (!canPlaceFurniture(nextLayout, type, col, row)) return
+    nextLayout = placeFurniture(nextLayout, { uid, type, col, row })
+  }
+
+  for (const item of BEAUTIFY_DECORATIONS) {
+    ensureDecoration(item.uid, item.type, item.col, item.row)
+  }
+
+  for (const item of nextLayout.furniture) {
+    const entry = getCatalogEntry(item.type)
+    if (!entry?.isDesk) continue
+    const coffeeUid = `coffee-${item.uid}`
+    if (nextLayout.furniture.some((f) => f.uid === coffeeUid)) continue
+    const coffeeCol = item.col + Math.max(0, entry.footprintW - 1)
+    const coffeeRow = item.row
+    if (!canPlaceFurniture(nextLayout, FurnitureType.COFFEE, coffeeCol, coffeeRow)) continue
+    nextLayout = placeFurniture(nextLayout, {
+      uid: coffeeUid,
+      type: FurnitureType.COFFEE,
+      col: coffeeCol,
+      row: coffeeRow,
+    })
+  }
+
+  return nextLayout
+}
 
 let cachedOfficeState: OfficeState | null = null
 let cachedEditorState: EditorState | null = null
@@ -362,7 +445,7 @@ export default function PixelOfficePage() {
       const width = container.clientWidth
       const height = container.clientHeight
 
-      // Keep desktop zoom fixed. On mobile, fit the whole office into current viewport.
+      // On mobile and desktop, keep the office fitted inside the visible canvas area.
       if (isMobileViewport) {
         const layout = office.layout
         const rows = layout.rows
@@ -384,10 +467,25 @@ export default function PixelOfficePage() {
         const targetPanY = Math.min(maxPanY, Math.max(minPanY - 16, basePanY + MOBILE_VIEW_NUDGE_Y_PX))
         panRef.current = { x: 0, y: Math.round(targetPanY) }
       } else {
-        zoomRef.current = DESKTOP_CANVAS_ZOOM
-        if (panRef.current.x !== 0 || panRef.current.y !== 0) {
-          panRef.current = { x: 0, y: 0 }
-        }
+        const layout = office.layout
+        const bounds = getLayoutContentBounds(layout)
+        const contentCols = Math.max(1, bounds.maxCol - bounds.minCol + 1)
+        const contentRows = Math.max(1, bounds.maxRow - bounds.minRow + 1)
+        const paddedCols = contentCols + DESKTOP_CONTENT_PADDING_TILES_X * 2
+        const paddedRows = contentRows + DESKTOP_CONTENT_PADDING_TILES_Y * 2
+        const fitW = Math.max(1, width - DESKTOP_FIT_PADDING_PX * 2) / Math.max(1, paddedCols * TILE_SIZE)
+        const fitH = Math.max(1, height - DESKTOP_FIT_PADDING_PX * 2) / Math.max(1, paddedRows * TILE_SIZE)
+        const fitZoom = Math.min(fitW, fitH)
+        const nextZoom = Math.max(DESKTOP_MIN_ZOOM, Math.min(DESKTOP_CANVAS_ZOOM, fitZoom || DESKTOP_CANVAS_ZOOM))
+        zoomRef.current = nextZoom
+
+        const contentCenterX = ((bounds.minCol + bounds.maxCol + 1) / 2) * TILE_SIZE
+        const contentCenterY = ((bounds.minRow + bounds.maxRow + 1) / 2) * TILE_SIZE
+        const fullCenterX = (layout.cols * TILE_SIZE) / 2
+        const fullCenterY = (layout.rows * TILE_SIZE) / 2
+        const targetPanX = (fullCenterX - contentCenterX) * nextZoom
+        const targetPanY = (fullCenterY - contentCenterY) * nextZoom
+        panRef.current = { x: Math.round(targetPanX), y: Math.round(targetPanY) }
       }
       const dpr = window.devicePixelRatio || 1
       office.update(dt)
@@ -1236,6 +1334,18 @@ export default function PixelOfficePage() {
     localStorage.setItem('pixel-office-sound', String(newVal))
   }, [])
 
+  const handleBeautifyOffice = useCallback(() => {
+    const office = officeRef.current
+    if (!office) return
+    const beautifiedLayout = buildBeautifiedLayout(office.layout)
+    applyEdit(beautifiedLayout)
+    const id = Date.now()
+    setBroadcasts((prev) => [...prev, { id, emoji: "✨", text: "办公室已美化，记得保存布局" }])
+    setTimeout(() => {
+      setBroadcasts((prev) => prev.filter((item) => item.id !== id))
+    }, 3200)
+  }, [applyEdit])
+
   const resetView = useCallback(() => {
     zoomRef.current = isMobileViewport ? MOBILE_CANVAS_ZOOM : DESKTOP_CANVAS_ZOOM
     panRef.current = { x: 0, y: 0 }
@@ -1302,6 +1412,9 @@ export default function PixelOfficePage() {
     }
     return expanded
   }, [agents])
+  const onlineAgentCount = useMemo(() => agents.filter((agent) => agent.state !== 'offline').length, [agents])
+  const workingAgentCount = useMemo(() => agents.filter((agent) => agent.state === 'working').length, [agents])
+  const subagentCount = useMemo(() => agents.reduce((sum, agent) => sum + (agent.subagents?.length || 0), 0), [agents])
 
   const mobileAgentPages: AgentActivity[][] = []
   for (let i = 0; i < displayAgents.length; i += 9) {
@@ -1356,7 +1469,9 @@ export default function PixelOfficePage() {
   }
 
   return (
-    <div className="relative flex flex-col overflow-hidden h-[calc(100dvh-3.5rem)] md:h-full">
+    <div className="h-[calc(100dvh-3.5rem)] md:h-full overflow-hidden">
+      <div className="flex h-full min-h-0 flex-col md:flex-row">
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       {/* Floating photo comment DOM bubbles */}
       {floatingCommentsRef.current.map(fc => (
         <div key={fc.key} className="absolute pointer-events-none z-30 whitespace-nowrap"
@@ -1392,10 +1507,22 @@ export default function PixelOfficePage() {
         </div>
       ))}
       {/* Top bar: agent tags + controls */}
-      <div className="flex flex-col gap-2 p-3 md:p-4 border-b border-[var(--border)]">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-bold text-[var(--text)]">{t('pixelOffice.title')}</span>
-          <div className="flex gap-2">
+      <div className="flex flex-col gap-2 border-b border-[var(--border)] bg-[rgba(6,18,37,0.62)] p-3 md:p-4 backdrop-blur-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-bold text-[var(--text)]">{t('pixelOffice.title')}</span>
+            <span className="hidden rounded-md border border-[var(--border)] bg-[var(--card)]/60 px-2 py-0.5 text-[10px] text-[var(--text-muted)] md:inline-block">
+              live workspace
+            </span>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              onClick={handleBeautifyOffice}
+              className="px-3 py-1.5 text-xs rounded-lg border border-[var(--accent)]/35 bg-[linear-gradient(120deg,rgba(24,232,255,0.16),rgba(76,160,255,0.12))] text-[var(--text)] hover:border-[var(--accent)]"
+              title="一键优化办公室布局与装饰"
+            >
+              ✨ 美化办公室
+            </button>
             <button onClick={toggleSound}
               className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
                 soundOn ? 'bg-[var(--accent)]/10 border-[var(--accent)]/30 text-[var(--accent)]'
@@ -1411,6 +1538,17 @@ export default function PixelOfficePage() {
               {isEditMode ? t('pixelOffice.exitEdit') : t('pixelOffice.editMode')}
             </button>
           </div>
+        </div>
+        <div className="hidden md:flex items-center gap-2 text-[10px]">
+          <span className="rounded-md border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-emerald-200">
+            在线 {onlineAgentCount}/{agents.length}
+          </span>
+          <span className="rounded-md border border-sky-400/30 bg-sky-500/10 px-2 py-0.5 text-sky-200">
+            工作中 {workingAgentCount}
+          </span>
+          <span className="rounded-md border border-rose-400/30 bg-rose-500/10 px-2 py-0.5 text-rose-200">
+            临时工 {subagentCount}
+          </span>
         </div>
         <div className="md:hidden overflow-x-auto pb-1">
           {displayAgents.length === 0 ? (
@@ -1802,11 +1940,13 @@ export default function PixelOfficePage() {
           </>
         )}
 
-      </div>
-        {/* Task Timeline */}
-        <div className="h-48 flex-shrink-0">
-          <TaskTimeline />
         </div>
+        </div>
+        {/* Task Timeline */}
+        <aside className="h-56 flex-shrink-0 border-t border-[var(--border)] bg-[var(--bg)] md:h-full md:w-[28rem] md:min-w-[24rem] md:max-w-[32rem] md:border-t-0 md:border-l">
+          <TaskTimeline className="h-full max-w-none" />
+        </aside>
+      </div>
     </div>
   )
 }

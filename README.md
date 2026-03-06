@@ -2,8 +2,8 @@
 
 一个轻量级 Web 仪表盘，用于一览所有 [OpenClaw](https://github.com/openclaw/openclaw) 机器人/Agent/模型/会话的运行状态。
 
-![仪表盘预览](docs/bot_dashboard.png)
-![Pixel Office](docs/pixel-office.png)
+![仪表盘预览](docs/images/bot_dashboard.png)
+![Pixel Office](docs/images/pixel-office.png)
 
 ## 背景介绍
 
@@ -30,16 +30,16 @@
 ## 界面预览
 
 ### 机器人仪表盘
-![仪表盘预览](docs/bot_dashboard.png)
+![仪表盘预览](docs/images/bot_dashboard.png)
 
 ### 模型列表
-![模型列表预览](docs/models-preview.png)
+![模型列表预览](docs/images/models-preview.png)
 
 ### 会话管理
-![会话列表预览](docs/sessions-preview.png)
+![会话列表预览](docs/images/sessions-preview.png)
 
 ### 像素办公室
-![像素办公室](docs/pixel-office.png)
+![像素办公室](docs/images/pixel-office.png)
 
 ## 快速开始
 
@@ -56,6 +56,15 @@ npm run dev
 ```
 
 浏览器打开 [http://localhost:3000](http://localhost:3000) 即可访问。
+
+## 文档导航
+
+- [文档总览](docs/README.md)
+- [任务生命周期](docs/TASK_LIFECYCLE.md)
+- [任务自动调度](docs/TASK_AUTO_DISPATCH.md)
+- [Boss 自动审查](docs/BOSS_AUTO_REVIEW.md)
+- [Agent 空闲等待](docs/AGENT_IDLE_WAIT.md)
+- [飞书通知](docs/FEISHU_NOTIFICATIONS.md)
 
 ## 技术栈
 

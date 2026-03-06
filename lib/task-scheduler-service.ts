@@ -12,6 +12,7 @@ import {
   dispatchTaskToAgent,
 } from "./task-scheduler";
 import { getSystemConfig } from "./system-config";
+import { buildTaskMap, evaluateTaskDependencies } from "./task-dependency";
 
 type SchedulerConfig = {
   enabled: boolean;
@@ -134,23 +135,80 @@ export async function schedulePendingTasks(): Promise<void> {
     console.log(`📋 [调度检查] ${new Date().toLocaleString('zh-CN')}`);
     console.log('🔍'.repeat(30));
 
-    // 1. 获取待调度的任务
-    const assignedTasks = await taskStore.listTasks({ status: "assigned" });
+    // 1. 扫描 blocked 任务并自动解锁可执行任务
+    const allTasks = await taskStore.listTasks();
+    const taskMap = buildTaskMap(allTasks);
+    const blockedTasks = allTasks.filter((task) => task.status === "blocked");
+    let unblockedCount = 0;
 
-    if (assignedTasks.length === 0) {
-      console.log('   ✅ 没有待调度的任务');
+    for (const task of blockedTasks) {
+      if (!task.assignedTo) {
+        await taskStore.updateTask(task.id, {
+          status: "pending",
+          blockedReason: undefined,
+        });
+        continue;
+      }
+
+      const dependencyCheck = evaluateTaskDependencies(task, taskMap);
+      if (dependencyCheck.satisfied) {
+        await taskStore.updateTask(task.id, {
+          status: "assigned",
+          blockedReason: undefined,
+        });
+        unblockedCount++;
+      } else if (task.blockedReason !== dependencyCheck.blockedReason) {
+        await taskStore.updateTask(task.id, {
+          blockedReason: dependencyCheck.blockedReason,
+        });
+      }
+    }
+
+    // 2. 获取最新 assigned 任务并再次校验依赖，避免越权调度
+    const latestTasks = await taskStore.listTasks();
+    const latestTaskMap = buildTaskMap(latestTasks);
+    const assignedTasks = latestTasks.filter((task) => task.status === "assigned");
+    const readyTasks: typeof assignedTasks = [];
+    let dependencySkipCount = 0;
+
+    for (const task of assignedTasks) {
+      const dependencyCheck = evaluateTaskDependencies(task, latestTaskMap);
+      if (dependencyCheck.satisfied) {
+        readyTasks.push(task);
+        continue;
+      }
+
+      await taskStore.updateTask(task.id, {
+        status: "blocked",
+        blockedReason: dependencyCheck.blockedReason,
+      });
+      dependencySkipCount++;
+    }
+
+    if (readyTasks.length === 0) {
+      console.log('   ✅ 没有可调度任务');
+      console.log(`   ⛔ blocked: ${blockedTasks.length}`);
+      console.log(`   🔓 本轮解锁: ${unblockedCount}`);
+      if (dependencySkipCount > 0) {
+        console.log(`   ⏭️  依赖阻塞跳过: ${dependencySkipCount}`);
+      }
       console.log('');
       isRunning = false;
       return;
     }
 
-    console.log(`   📊 找到 ${assignedTasks.length} 个待调度任务`);
+    console.log(`   📊 可调度任务: ${readyTasks.length} 个`);
+    console.log(`   ⛔ blocked 任务: ${blockedTasks.length} 个`);
+    console.log(`   🔓 本轮自动解锁: ${unblockedCount} 个`);
+    if (dependencySkipCount > 0) {
+      console.log(`   ⏭️  依赖阻塞跳过: ${dependencySkipCount} 个`);
+    }
 
-    // 2. 限制并发数量
-    const tasksToDispatch = assignedTasks.slice(0, schedulerConfig.maxConcurrent);
+    // 3. 限制并发数量
+    const tasksToDispatch = readyTasks.slice(0, schedulerConfig.maxConcurrent);
     console.log(`   🎯 本次调度 ${tasksToDispatch.length} 个任务`);
 
-    // 3. 逐个调度任务
+    // 4. 逐个调度任务
     let successCount = 0;
     let skipCount = 0;
     let failCount = 0;
@@ -207,7 +265,9 @@ export async function schedulePendingTasks(): Promise<void> {
     console.log(`📈 [调度统计] 本次检查完成`);
     console.log(`   成功: ${successCount} 个`);
     console.log(`   跳过: ${skipCount} 个`);
+    console.log(`   依赖阻塞: ${dependencySkipCount} 个`);
     console.log(`   失败: ${failCount} 个`);
+    console.log(`   自动解锁: ${unblockedCount} 个`);
     console.log(`   总计调度: ${dispatchCount} 个`);
     console.log('📊'.repeat(30));
     console.log('');

@@ -1,5 +1,13 @@
 import { NextResponse } from "next/server";
 import { taskStore } from "@/lib/task-store";
+import type { Task } from "@/lib/task-types";
+import {
+  assertTaskDependenciesValid,
+  canEditTaskDependencies,
+  loadTaskMap,
+  normalizeDependsOnTaskIds,
+  resolveAssignmentStateByDependencies,
+} from "@/lib/task-dependency";
 
 // GET /api/tasks/[id] - 获取单个任务详情
 export async function GET(
@@ -36,9 +44,72 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const updates = await req.json();
-    const task = await taskStore.updateTask(id, updates);
+    const currentTask = await taskStore.getTask(id);
+    if (!currentTask) {
+      return NextResponse.json(
+        { success: false, error: "Task not found" },
+        { status: 404 }
+      );
+    }
 
+    const rawUpdates = await req.json();
+    if (rawUpdates.parentTaskId !== undefined) {
+      return NextResponse.json(
+        { success: false, error: "parentTaskId 已弃用，请使用 dependsOnTaskIds" },
+        { status: 400 }
+      );
+    }
+
+    const updates: Partial<Task> = { ...rawUpdates };
+    const hasDependencyUpdate = Object.prototype.hasOwnProperty.call(rawUpdates, "dependsOnTaskIds");
+
+    if (hasDependencyUpdate) {
+      if (!canEditTaskDependencies(currentTask.status)) {
+        return NextResponse.json(
+          { success: false, error: `Task status is ${currentTask.status}, cannot update dependencies` },
+          { status: 400 }
+        );
+      }
+
+      updates.dependsOnTaskIds = normalizeDependsOnTaskIds(rawUpdates.dependsOnTaskIds);
+    }
+
+    const hasAssignmentUpdate = Object.prototype.hasOwnProperty.call(rawUpdates, "assignedTo");
+    const shouldRecomputeAssignment = hasDependencyUpdate || hasAssignmentUpdate;
+
+    if (shouldRecomputeAssignment) {
+      const dependsOnTaskIds = (updates.dependsOnTaskIds as string[] | undefined) || currentTask.dependsOnTaskIds || [];
+      const assignedTo = updates.assignedTo !== undefined
+        ? (typeof updates.assignedTo === "string" && updates.assignedTo.trim() !== ""
+          ? updates.assignedTo.trim()
+          : undefined)
+        : currentTask.assignedTo;
+      updates.assignedTo = assignedTo;
+
+      const taskMap = await loadTaskMap();
+      const nextTask = {
+        ...currentTask,
+        ...updates,
+        dependsOnTaskIds,
+        assignedTo,
+      };
+
+      assertTaskDependenciesValid(id, dependsOnTaskIds, taskMap);
+      taskMap.set(id, nextTask);
+
+      if (canEditTaskDependencies(currentTask.status)) {
+        if (assignedTo) {
+          const assignmentState = resolveAssignmentStateByDependencies(nextTask, taskMap);
+          updates.status = assignmentState.status;
+          updates.blockedReason = assignmentState.blockedReason;
+        } else {
+          updates.status = "pending";
+          updates.blockedReason = undefined;
+        }
+      }
+    }
+
+    const task = await taskStore.updateTask(id, updates);
     if (!task) {
       return NextResponse.json(
         { success: false, error: "Task not found" },

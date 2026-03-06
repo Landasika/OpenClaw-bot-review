@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
-import type { CreateTaskRequest, TaskListQuery } from "@/lib/task-types";
+import type { CreateTaskRequest, TaskListQuery, TaskStatus } from "@/lib/task-types";
 import { taskStore } from "@/lib/task-store";
 import { dispatchTaskToAgent } from "@/lib/task-scheduler";
 import { getDefaultAgentId } from "@/lib/system-config";
+import {
+  assertTaskDependenciesValid,
+  loadTaskMap,
+  normalizeDependsOnTaskIds,
+  resolveAssignmentStateByDependencies,
+} from "@/lib/task-dependency";
 
 // GET /api/tasks - 查询任务列表
 export async function GET(req: Request) {
@@ -11,12 +17,14 @@ export async function GET(req: Request) {
     const status = searchParams.get("status") as any;
     const assignedTo = searchParams.get("assignedTo") || undefined;
     const createdBy = searchParams.get("createdBy") || undefined;
+    const dependsOnTaskId = searchParams.get("dependsOnTaskId") || undefined;
     const limit = searchParams.get("limit") ? parseInt(searchParams.get("limit")!) : undefined;
 
     const filter: any = {};
     if (status) filter.status = status;
     if (assignedTo) filter.assignedTo = assignedTo;
     if (createdBy) filter.createdBy = createdBy;
+    if (dependsOnTaskId) filter.dependsOnTaskId = dependsOnTaskId;
 
     let tasks = await taskStore.listTasks(filter);
 
@@ -51,29 +59,56 @@ export async function POST(req: Request) {
       );
     }
 
+    if ((body as any).parentTaskId !== undefined) {
+      return NextResponse.json(
+        { success: false, error: "parentTaskId 已弃用，请使用 dependsOnTaskIds" },
+        { status: 400 }
+      );
+    }
+
     const now = Date.now();
+    const taskId = taskStore.generateId();
+    const assignedTo = typeof body.assignedTo === "string" && body.assignedTo.trim() !== ""
+      ? body.assignedTo.trim()
+      : undefined;
+    const dependsOnTaskIds = normalizeDependsOnTaskIds(body.dependsOnTaskIds);
+    const taskMap = await loadTaskMap();
+    assertTaskDependenciesValid(taskId, dependsOnTaskIds, taskMap);
+
+    let status: TaskStatus = "pending";
+    let blockedReason: string | undefined;
+    if (assignedTo) {
+      const resolved = resolveAssignmentStateByDependencies(
+        { dependsOnTaskIds },
+        taskMap
+      );
+      status = resolved.status;
+      blockedReason = resolved.blockedReason;
+    }
+
     const task = await taskStore.createTask({
-      id: taskStore.generateId(),
+      id: taskId,
       title: body.title,
       description: body.description,
-      status: body.assignedTo ? "assigned" : "pending",
+      status,
       priority: body.priority || "medium",
-      assignedTo: body.assignedTo,
+      assignedTo,
       createdBy: defaultAgentId,
       createdAt: now,
       updatedAt: now,
       dueDate: body.dueDate,
       tags: body.tags || [],
       estimatedHours: body.estimatedHours,
-      parentTaskId: body.parentTaskId,
+      dependsOnTaskIds,
+      blockedReason,
     });
 
     // 如果分配了员工且要求自动调度
-    if (body.assignedTo && body.autoDispatch === true) {
+    if (assignedTo && body.autoDispatch === true && task.status === "assigned") {
       // 异步调度，不阻塞响应
       dispatchTaskToAgent(
         task.id,
-        body.assignedTo,
+        assignedTo,
         `任务: ${task.title}\n\n${task.description}`
       ).catch(err => {
         console.error(`自动调度失败:`, err);
@@ -90,6 +125,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       task,
+      message: task.status === "blocked" ? task.blockedReason : undefined,
     });
   } catch (err: any) {
     return NextResponse.json(

@@ -96,6 +96,7 @@ const SUBAGENT_PRIORITY_SEAT_IDS = [
 const SUBAGENT_SPAWN_CENTER_COL = 10
 const SUBAGENT_SPAWN_CENTER_ROW = 14
 const SUBAGENT_RUN_SPEED_MULTIPLIER = 2.8
+const BOSS_SEAT_ID = 'chair-boss'
 
 export class OfficeState {
   layout: OfficeLayout
@@ -105,7 +106,10 @@ export class OfficeState {
   furniture: FurnitureInstance[]
   walkableTiles: Array<{ col: number; row: number }>
   interactionPoints: InteractionPoint[]
+  nonBossIdleWalkableTiles: Array<{ col: number; row: number }>
+  nonBossInteractionPoints: InteractionPoint[]
   doorwayTiles: Array<{ col: number; row: number }>
+  bossOfficeTiles: Set<string>
   characters: Map<number, Character> = new Map()
   selectedAgentId: number | null = null
   cameraFollowId: number | null = null
@@ -134,6 +138,64 @@ export class OfficeState {
     return getBlockedTiles(furniture, nonBlockingSeatTiles)
   }
 
+  private buildBossOfficeTiles(): Set<string> {
+    const seat = this.seats.get(BOSS_SEAT_ID)
+    if (!seat) return new Set()
+
+    const startCol = Math.round(seat.seatCol)
+    const startRow = Math.round(seat.seatRow)
+    if (
+      startCol < 0 || startCol >= this.layout.cols ||
+      startRow < 0 || startRow >= this.layout.rows
+    ) {
+      return new Set()
+    }
+
+    const targetTile = this.tileMap[startRow]?.[startCol]
+    if (targetTile === undefined) return new Set()
+
+    const visited = new Set<string>()
+    const queue: Array<{ col: number; row: number }> = [{ col: startCol, row: startRow }]
+    while (queue.length > 0) {
+      const cur = queue.shift()!
+      if (cur.col < 0 || cur.col >= this.layout.cols || cur.row < 0 || cur.row >= this.layout.rows) continue
+      const key = `${cur.col},${cur.row}`
+      if (visited.has(key)) continue
+      if (this.tileMap[cur.row]?.[cur.col] !== targetTile) continue
+      visited.add(key)
+      queue.push({ col: cur.col + 1, row: cur.row })
+      queue.push({ col: cur.col - 1, row: cur.row })
+      queue.push({ col: cur.col, row: cur.row + 1 })
+      queue.push({ col: cur.col, row: cur.row - 1 })
+    }
+    return visited
+  }
+
+  private rebuildMovementZones(): void {
+    this.bossOfficeTiles = this.buildBossOfficeTiles()
+    this.nonBossIdleWalkableTiles = this.walkableTiles.filter(
+      (t) => !this.bossOfficeTiles.has(`${t.col},${t.row}`)
+    )
+    if (this.nonBossIdleWalkableTiles.length === 0) {
+      this.nonBossIdleWalkableTiles = this.walkableTiles
+    }
+    this.nonBossInteractionPoints = this.interactionPoints.filter(
+      (p) => !this.bossOfficeTiles.has(`${p.col},${p.row}`)
+    )
+  }
+
+  private shouldRestrictIdleArea(ch: Character): boolean {
+    return !ch.isBoss && !ch.isCat && !ch.isLobster
+  }
+
+  private getIdleWalkableTilesForCharacter(ch: Character): Array<{ col: number; row: number }> {
+    return this.shouldRestrictIdleArea(ch) ? this.nonBossIdleWalkableTiles : this.walkableTiles
+  }
+
+  private getInteractionPointsForCharacter(ch: Character): InteractionPoint[] {
+    return this.shouldRestrictIdleArea(ch) ? this.nonBossInteractionPoints : this.interactionPoints
+  }
+
   constructor(layout?: OfficeLayout) {
     this.layout = layout || createDefaultLayout()
     this.tileMap = layoutToTileMap(this.layout)
@@ -142,7 +204,11 @@ export class OfficeState {
     this.furniture = layoutToFurnitureInstances(this.layout.furniture)
     this.walkableTiles = getWalkableTiles(this.tileMap, this.blockedTiles)
     this.interactionPoints = getInteractionPoints(this.layout.furniture, this.tileMap, this.blockedTiles)
+    this.nonBossIdleWalkableTiles = this.walkableTiles
+    this.nonBossInteractionPoints = this.interactionPoints
     this.doorwayTiles = getDoorwayTiles(this.layout)
+    this.bossOfficeTiles = new Set()
+    this.rebuildMovementZones()
     this.spawnCat()
     this.spawnLobster()
     this.spawnHunterLobster()
@@ -162,6 +228,7 @@ export class OfficeState {
     this.walkableTiles = getWalkableTiles(this.tileMap, this.blockedTiles)
     this.interactionPoints = getInteractionPoints(layout.furniture, this.tileMap, this.blockedTiles)
     this.doorwayTiles = getDoorwayTiles(layout)
+    this.rebuildMovementZones()
 
     // Shift character positions when grid expands left/up
     if (shift && (shift.col !== 0 || shift.row !== 0)) {
@@ -184,6 +251,15 @@ export class OfficeState {
     // First pass: try to keep characters at their existing seats
     for (const ch of this.characters.values()) {
       if (ch.seatId && this.seats.has(ch.seatId)) {
+        const forceBossSeat =
+          ch.isBoss &&
+          ch.seatId !== BOSS_SEAT_ID &&
+          this.seats.has(BOSS_SEAT_ID)
+        const isReservedBossSeat = ch.seatId === BOSS_SEAT_ID && !ch.isBoss
+        if (forceBossSeat || isReservedBossSeat) {
+          ch.seatId = null
+          continue
+        }
         const seat = this.seats.get(ch.seatId)!
         if (!seat.assigned) {
           seat.assigned = true
@@ -204,7 +280,12 @@ export class OfficeState {
     // Second pass: assign remaining characters to free seats
     for (const ch of this.characters.values()) {
       if (ch.seatId) continue
-      const seatId = this.findFreeSeat()
+      const seatId =
+        ch.isBoss &&
+        this.seats.has(BOSS_SEAT_ID) &&
+        !this.seats.get(BOSS_SEAT_ID)!.assigned
+          ? BOSS_SEAT_ID
+          : this.findFreeSeat(ch.isBoss)
       if (seatId) {
         this.seats.get(seatId)!.assigned = true
         ch.seatId = seatId
@@ -228,8 +309,9 @@ export class OfficeState {
 
   /** Move a character to a random walkable tile */
   private relocateCharacterToWalkable(ch: Character): void {
-    if (this.walkableTiles.length === 0) return
-    const spawn = this.walkableTiles[Math.floor(Math.random() * this.walkableTiles.length)]
+    const candidates = this.getIdleWalkableTilesForCharacter(ch)
+    if (candidates.length === 0) return
+    const spawn = candidates[Math.floor(Math.random() * candidates.length)]
     ch.tileCol = spawn.col
     ch.tileRow = spawn.row
     ch.x = spawn.col * TILE_SIZE + TILE_SIZE / 2
@@ -259,11 +341,61 @@ export class OfficeState {
     return result
   }
 
-  private findFreeSeat(): string | null {
+  private findFreeSeat(includeBossSeat = false): string | null {
     for (const [uid, seat] of this.seats) {
+      if (!includeBossSeat && uid === BOSS_SEAT_ID) continue
       if (!seat.assigned) return uid
     }
     return null
+  }
+
+  private getSeatOccupant(seatId: string): Character | null {
+    for (const ch of this.characters.values()) {
+      if (ch.seatId === seatId) return ch
+    }
+    return null
+  }
+
+  private moveCharacterOffBossSeat(ch: Character): void {
+    const nextSeatId = this.findFreeSeat(false)
+    if (nextSeatId) {
+      this.reassignSeat(ch.id, nextSeatId)
+      return
+    }
+
+    if (ch.seatId) {
+      const seat = this.seats.get(ch.seatId)
+      if (seat) seat.assigned = false
+    }
+    ch.seatId = null
+    ch.path = []
+    ch.moveProgress = 0
+    ch.state = CharacterState.IDLE
+    ch.seatTimer = 0
+  }
+
+  setAgentBoss(id: number, isBoss: boolean): void {
+    const ch = this.characters.get(id)
+    if (!ch) return
+    ch.isBoss = isBoss
+
+    if (!this.seats.has(BOSS_SEAT_ID)) return
+
+    if (isBoss) {
+      const occupant = this.getSeatOccupant(BOSS_SEAT_ID)
+      if (occupant && occupant.id !== id) {
+        occupant.isBoss = false
+        this.moveCharacterOffBossSeat(occupant)
+      }
+      if (ch.seatId !== BOSS_SEAT_ID) {
+        this.reassignSeat(id, BOSS_SEAT_ID)
+      }
+      return
+    }
+
+    if (ch.seatId === BOSS_SEAT_ID) {
+      this.moveCharacterOffBossSeat(ch)
+    }
   }
 
   private getSubagentSpawnCandidates(): Array<{ col: number; row: number }> {
@@ -335,7 +467,7 @@ export class OfficeState {
       }
     }
     if (!seatId) {
-      seatId = this.findFreeSeat()
+      seatId = this.findFreeSeat(preferredSeatId === BOSS_SEAT_ID)
     }
 
     let ch: Character
@@ -382,6 +514,8 @@ export class OfficeState {
       ch.tileCol = spawn.col
       ch.tileRow = spawn.row
     }
+
+    ch.isBoss = seatId === BOSS_SEAT_ID
 
     if (!skipSpawnEffect) {
       ch.matrixEffect = 'spawn'
@@ -717,6 +851,7 @@ export class OfficeState {
     if (!bestSeatId) {
       let bestDist = Infinity
       for (const [uid, seat] of this.seats) {
+        if (uid === BOSS_SEAT_ID) continue
         if (!seat.assigned) {
           const d = dist(seat.seatCol, seat.seatRow)
           if (d < bestDist) {
@@ -1013,9 +1148,11 @@ export class OfficeState {
         continue
       }
 
+      const idleWalkableTiles = this.getIdleWalkableTilesForCharacter(ch)
+      const interactionPoints = this.getInteractionPointsForCharacter(ch)
       // Temporarily unblock own seat so character can pathfind to it
       this.withOwnSeatUnblocked(ch, () =>
-        updateCharacter(ch, dt, this.walkableTiles, this.seats, this.tileMap, this.blockedTiles, this.interactionPoints)
+        updateCharacter(ch, dt, idleWalkableTiles, this.seats, this.tileMap, this.blockedTiles, interactionPoints)
       )
 
       if (ch.isLobster) {

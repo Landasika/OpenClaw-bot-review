@@ -11,12 +11,19 @@ import {
   getBossReviewerStatus,
   triggerReviewCheck,
 } from "@/lib/task-scheduler-extended";
+import {
+  startMeetingService,
+  stopMeetingService,
+  getMeetingServiceStatus,
+  triggerMeetingNow,
+} from "@/lib/meeting-service";
 import { getSystemConfig } from "@/lib/system-config";
 
-// GET /api/task-scheduler - 获取调度器和审查器状态
+// GET /api/task-scheduler - 获取调度器、审查器和会议服务状态
 export async function GET() {
   const scheduler = getSchedulerStatus();
   const reviewer = getBossReviewerStatus();
+  const meeting = getMeetingServiceStatus();
   const systemConfig = getSystemConfig();
 
   return NextResponse.json({
@@ -39,16 +46,30 @@ export async function GET() {
         ? `${Math.round((Date.now() - (reviewer.lastReviewTime || Date.now())) / 1000)}秒`
         : "未运行",
     },
+    meeting: {
+      ...meeting,
+      lastMeetingTimeFormatted: meeting.lastMeetingTime
+        ? new Date(meeting.lastMeetingTime).toLocaleString("zh-CN")
+        : "从未开会",
+      uptime: meeting.running
+        ? `${Math.round((Date.now() - (meeting.lastMeetingTime || Date.now())) / 1000)}秒`
+        : "未运行",
+    },
     settings: {
+      taskDispatchEnabled: systemConfig.taskDispatchEnabled,
       taskDispatchIntervalSeconds: systemConfig.taskDispatchIntervalSeconds,
       taskDispatchMaxConcurrent: systemConfig.taskDispatchMaxConcurrent,
+      bossReviewEnabled: systemConfig.bossReviewEnabled,
       bossReviewIntervalSeconds: systemConfig.bossReviewIntervalSeconds,
       bossReviewMaxConcurrent: systemConfig.bossReviewMaxConcurrent,
+      meetingEnabled: systemConfig.meetingEnabled,
+      meetingDailyTime: systemConfig.meetingDailyTime,
+      meetingTimezone: systemConfig.meetingTimezone,
     },
   });
 }
 
-// POST /api/task-scheduler - 控制调度器和审查器
+// POST /api/task-scheduler - 控制调度器、审查器和会议服务
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -62,6 +83,8 @@ export async function POST(req: Request) {
         return handleSchedulerAction(action);
       case "reviewer":
         return handleReviewerAction(action);
+      case "meeting":
+        return handleMeetingAction(action);
       default:
         return NextResponse.json(
           {
@@ -167,6 +190,55 @@ async function handleReviewerAction(action: string) {
         success: true,
         message: "审查器已重启",
         reviewer: getBossReviewerStatus(),
+      });
+
+    default:
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Unknown action: ${action}`,
+        },
+        { status: 400 }
+      );
+  }
+}
+
+async function handleMeetingAction(action: string) {
+  switch (action) {
+    case "start":
+      startMeetingService();
+      return NextResponse.json({
+        success: true,
+        message: "会议服务已启动",
+        meeting: getMeetingServiceStatus(),
+      });
+
+    case "stop":
+      stopMeetingService();
+      return NextResponse.json({
+        success: true,
+        message: "会议服务已停止",
+        meeting: getMeetingServiceStatus(),
+      });
+
+    case "trigger":
+      const result = await triggerMeetingNow();
+      return NextResponse.json({
+        success: result.success,
+        message: result.success
+          ? "手动会议执行完成"
+          : "手动会议执行失败",
+        result,
+        meeting: getMeetingServiceStatus(),
+      });
+
+    case "restart":
+      stopMeetingService();
+      setTimeout(() => startMeetingService(), 1000);
+      return NextResponse.json({
+        success: true,
+        message: "会议服务已重启",
+        meeting: getMeetingServiceStatus(),
       });
 
     default:

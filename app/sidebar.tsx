@@ -31,11 +31,14 @@ const NAV_ITEMS = [
     group: "nav.tasks",
     items: [
       { href: "/tasks", icon: "📋", labelKey: "nav.taskManagement" },
+      { href: "/meetings", icon: "🗂️", labelKey: "nav.meetings" },
+      { href: "/meeting-settings", icon: "🗓️", labelKey: "nav.meetingSettings" },
     ],
   },
   {
     group: "nav.config",
     items: [
+      { href: "/system-config", icon: "⚙️", labelKey: "nav.systemConfig" },
       { href: "/skills", icon: "🧩", labelKey: "nav.skills" },
     ],
   },

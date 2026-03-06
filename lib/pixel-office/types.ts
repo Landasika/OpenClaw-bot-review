@@ -175,6 +175,7 @@ export interface OfficeLayout {
 
 export interface Character {
   id: number
+  isBoss: boolean
   state: CharacterState
   dir: Direction
   x: number

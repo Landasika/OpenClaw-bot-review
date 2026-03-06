@@ -6,6 +6,7 @@
 
 import { startTaskScheduler } from "@/lib/task-scheduler-service";
 import { startBossReviewer } from "@/lib/task-scheduler-extended";
+import { startMeetingService } from "@/lib/meeting-service";
 import { getSystemConfig } from "@/lib/system-config";
 
 declare global {
@@ -43,7 +44,7 @@ export function initTaskAutomation(): void {
 
   console.log("");
   console.log("=".repeat(60));
-  console.log("🚀 [应用初始化] 启动任务调度和审查服务");
+  console.log("🚀 [应用初始化] 启动自动化服务");
   console.log("=".repeat(60));
 
   // 启动任务调度器（调度员工Agent执行任务）
@@ -52,10 +53,14 @@ export function initTaskAutomation(): void {
   // 启动Boss审查器（自动审查提交的任务）
   startBossReviewer();
 
+  // 启动团队会议服务（按设定时间自动开会）
+  startMeetingService();
+
   console.log("=".repeat(60));
   console.log("✅ [应用初始化] 服务已启动");
   console.log(`   📋 任务调度器: 每 ${cfg.taskDispatchIntervalSeconds} 秒检查待调度任务`);
   console.log(`   👑 Boss 审查器: 每 ${cfg.bossReviewIntervalSeconds} 秒检查待审查任务`);
+  console.log(`   🗓️  会议服务: 每天 ${cfg.meetingDailyTime} (${cfg.meetingTimezone})`);
   console.log("=".repeat(60));
   console.log("");
 }

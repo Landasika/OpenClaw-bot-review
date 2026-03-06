@@ -7,6 +7,7 @@ import { promisify } from "util";
 import { taskStore } from "./task-store";
 import * as FeishuNotifier from "./feishu-notifier";
 import { getSystemConfig } from "./system-config";
+import { buildTaskMap, evaluateTaskDependencies } from "./task-dependency";
 
 const execFileAsync = promisify(execFile);
 
@@ -52,6 +53,13 @@ export async function dispatchTaskToAgent(
     if (!task) {
       throw new Error(`Task ${taskId} not found`);
     }
+    const cancelTask = async (reason: string) => {
+      await taskStore.updateTask(taskId, {
+        status: "cancelled",
+        result: `执行失败: ${reason}`,
+        completedAt: Date.now(),
+      });
+    };
 
     console.log(`📝 [任务信息]`);
     console.log(`   标题: ${task.title}`);
@@ -104,6 +112,7 @@ export async function dispatchTaskToAgent(
           const error = `Agent ${agentId} is offline (ping succeeded but status still offline)`;
           console.log(`   ❌ [确认离线] Agent 状态仍为离线`);
           console.log('');
+          await cancelTask(error);
 
           await FeishuNotifier.notifyAgentOffline(
             taskId,
@@ -125,6 +134,7 @@ export async function dispatchTaskToAgent(
         console.log(`   ❌ [Ping 失败] ${pingResult.error}`);
         console.log(`   ❌ [确认离线] Agent 确实离线`);
         console.log('');
+        await cancelTask(error);
 
         await FeishuNotifier.notifyAgentOffline(
           taskId,
@@ -168,6 +178,7 @@ export async function dispatchTaskToAgent(
         console.log(`   错误: ${error}`);
         console.log('❌'.repeat(30));
         console.log('');
+        await cancelTask(error);
 
         return {
           success: false,
@@ -291,15 +302,19 @@ export async function dispatchTaskToAgent(
     console.log('');
 
     // 更新任务状态，记录错误
-    await taskStore.updateTask(taskId, {
-      result: `执行失败: ${errorMessage}`,
-      completedAt: Date.now(),
-    });
+    const existingTask = await taskStore.getTask(taskId);
+    if (existingTask) {
+      await taskStore.updateTask(taskId, {
+        status: "cancelled",
+        result: `执行失败: ${errorMessage}`,
+        completedAt: Date.now(),
+      });
+    }
 
     // 通知任务失败
     FeishuNotifier.notifyTaskDispatchFailed(
       taskId,
-      (await taskStore.getTask(taskId))?.title || taskId,
+      existingTask?.title || taskId,
       agentId,
       errorMessage
     ).catch(err => console.error("[Feishu] 通知失败:", err));
@@ -348,9 +363,27 @@ export async function autoDispatchPendingTasks(limit = 5): Promise<{
 }> {
   console.log(`[TaskScheduler] 自动调度待执行任务，最多 ${limit} 个`);
 
-  // 获取已分配但未开始的任务
-  const assignedTasks = await taskStore.listTasks({ status: "assigned" });
-  const tasksToDispatch = assignedTasks.slice(0, limit);
+  // 获取已分配但未开始的任务，并过滤依赖未满足的任务
+  const allTasks = await taskStore.listTasks();
+  const taskMap = buildTaskMap(allTasks);
+  const assignedTasks = allTasks.filter((task) => task.status === "assigned");
+  const readyTasks: typeof assignedTasks = [];
+
+  for (const task of assignedTasks) {
+    const dependencyCheck = evaluateTaskDependencies(task, taskMap);
+    if (dependencyCheck.satisfied) {
+      readyTasks.push(task);
+      continue;
+    }
+
+    await taskStore.updateTask(task.id, {
+      status: "blocked",
+      blockedReason: dependencyCheck.blockedReason,
+    });
+    console.log(`[TaskScheduler] 任务 ${task.id} 依赖未满足，已转为 blocked`);
+  }
+
+  const tasksToDispatch = readyTasks.slice(0, limit);
 
   if (tasksToDispatch.length === 0) {
     console.log("[TaskScheduler] 没有待调度的任务");
@@ -603,15 +636,7 @@ export async function waitForAgentIdle(
           // 重新获取状态
           const newStatus = await getAgentStatus(agentId);
 
-          if (newStatus.state !== 'offline') {
-            console.log(`   ✅ [状态恢复] Agent 已恢复在线！`);
-            console.log('');
-            console.log('='.repeat(60));
-            console.log(`✅ [Agent 空闲] ${agentId} 已空闲！开始调度任务...`);
-            console.log('='.repeat(60));
-            console.log('');
-            return true;
-          } else {
+          if (newStatus.state === 'offline') {
             console.log(`   ❌ [确认离线] Agent 状态仍为离线，停止等待`);
             console.log('');
             console.log('='.repeat(60));
@@ -620,6 +645,18 @@ export async function waitForAgentIdle(
             console.log('');
             return false;
           }
+
+          if (newStatus.idle) {
+            console.log(`   ✅ [状态恢复] Agent 已恢复在线且空闲`);
+            console.log('');
+            console.log('='.repeat(60));
+            console.log(`✅ [Agent 空闲] ${agentId} 已空闲！开始调度任务...`);
+            console.log('='.repeat(60));
+            console.log('');
+            return true;
+          }
+
+          console.log(`   ℹ️  [状态恢复] Agent 已在线但仍在忙碌，继续等待...`);
         } else {
           console.log(`   ❌ [Ping 失败] ${pingResult.error}`);
           console.log(`   ❌ [确认离线] Agent 确实离线，停止等待`);

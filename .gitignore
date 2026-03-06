@@ -32,6 +32,6 @@ test-results/
 ## Local sensitive runtime data
 .claude/
 data/system-config.json
-data/tasks/tasks.json
+data/tasks.json
 scripts/feishu_bot_send.py
 *.local.json

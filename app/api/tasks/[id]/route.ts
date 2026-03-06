@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { taskStore } from "@/lib/task-store";
 import type { Task } from "@/lib/task-types";
+import { normalizeAgentId } from "@/lib/agent-id";
 import {
   assertTaskDependenciesValid,
   canEditTaskDependencies,
@@ -81,7 +82,7 @@ export async function PATCH(
       const dependsOnTaskIds = (updates.dependsOnTaskIds as string[] | undefined) || currentTask.dependsOnTaskIds || [];
       const assignedTo = updates.assignedTo !== undefined
         ? (typeof updates.assignedTo === "string" && updates.assignedTo.trim() !== ""
-          ? updates.assignedTo.trim()
+          ? normalizeAgentId(updates.assignedTo.trim())
           : undefined)
         : currentTask.assignedTo;
       updates.assignedTo = assignedTo;

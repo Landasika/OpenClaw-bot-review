@@ -16,6 +16,12 @@ const execFileAsync = promisify(execFile);
 
 type BotType = string;
 
+type FeishuBotCredential = {
+  name: string;
+  appId: string;
+  appSecret: string;
+};
+
 function resolveDefaultChatId(override?: string): string {
   if (override && override.trim()) return override.trim();
   return getSystemConfig().feishuDefaultChatId || "";
@@ -29,6 +35,12 @@ function resolveBotType(agentId?: string): BotType {
   if (agentId && map[agentId]) return map[agentId];
   if (map[defaultAgentId]) return map[defaultAgentId];
   return "boss";
+}
+
+function hasValidBotCredentials(botCfg: unknown): botCfg is FeishuBotCredential {
+  if (!botCfg || typeof botCfg !== "object") return false;
+  const cfg = botCfg as Partial<FeishuBotCredential>;
+  return !!(cfg.name && cfg.name.trim() && cfg.appId && cfg.appId.trim() && cfg.appSecret && cfg.appSecret.trim());
 }
 
 function resolveEmployeeName(agentId: string): string {
@@ -50,6 +62,11 @@ async function sendFeishuMessage(
 
   if (!chatId) {
     return { success: false, error: "Missing feishu chat id" };
+  }
+
+  const botCfg = (cfg.feishuBots || {})[bot];
+  if (!hasValidBotCredentials(botCfg)) {
+    return { success: false, error: `feishuBots.${bot} 需要完整配置 name/appId/appSecret` };
   }
 
   try {
@@ -76,16 +93,22 @@ async function sendFeishuMessage(
       }
     );
 
-    if (stdout.includes("✅ 消息发送成功")) {
+    const output = `${stdout || ""}\n${stderr || ""}`.trim();
+    if (output.includes("✅ 消息发送成功")) {
       console.log("[Feishu] 消息发送成功");
       return { success: true };
     }
 
-    console.error("[Feishu] 发送失败:", stderr || stdout);
-    return { success: false, error: stderr || stdout };
+    console.error("[Feishu] 发送失败:", output || "Unknown output");
+    return { success: false, error: output || "Unknown output" };
   } catch (error: any) {
-    console.error("[Feishu] 发送消息异常:", error.message);
-    return { success: false, error: error.message };
+    const output = `${error?.stdout || ""}\n${error?.stderr || ""}`.trim();
+    if (output.includes("✅ 消息发送成功")) {
+      console.log("[Feishu] 消息发送成功");
+      return { success: true };
+    }
+    console.error("[Feishu] 发送消息异常:", output || error.message);
+    return { success: false, error: output || error.message };
   }
 }
 

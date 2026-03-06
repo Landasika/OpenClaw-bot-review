@@ -3,6 +3,7 @@ import type { CreateTaskRequest, TaskListQuery, TaskStatus } from "@/lib/task-ty
 import { taskStore } from "@/lib/task-store";
 import { dispatchTaskToAgent } from "@/lib/task-scheduler";
 import { getDefaultAgentId } from "@/lib/system-config";
+import { normalizeAgentId } from "@/lib/agent-id";
 import {
   assertTaskDependenciesValid,
   loadTaskMap,
@@ -15,8 +16,8 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status") as any;
-    const assignedTo = searchParams.get("assignedTo") || undefined;
-    const createdBy = searchParams.get("createdBy") || undefined;
+    const assignedTo = normalizeAgentId(searchParams.get("assignedTo") || undefined) || undefined;
+    const createdBy = normalizeAgentId(searchParams.get("createdBy") || undefined) || undefined;
     const dependsOnTaskId = searchParams.get("dependsOnTaskId") || undefined;
     const limit = searchParams.get("limit") ? parseInt(searchParams.get("limit")!) : undefined;
 
@@ -68,9 +69,9 @@ export async function POST(req: Request) {
 
     const now = Date.now();
     const taskId = taskStore.generateId();
-    const assignedTo = typeof body.assignedTo === "string" && body.assignedTo.trim() !== ""
-      ? body.assignedTo.trim()
-      : undefined;
+    const assignedTo = normalizeAgentId(
+      typeof body.assignedTo === "string" ? body.assignedTo.trim() : undefined
+    ) || undefined;
     const dependsOnTaskIds = normalizeDependsOnTaskIds(body.dependsOnTaskIds);
     const taskMap = await loadTaskMap();
     assertTaskDependenciesValid(taskId, dependsOnTaskIds, taskMap);

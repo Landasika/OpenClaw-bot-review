@@ -8,6 +8,7 @@ import { taskStore } from "./task-store";
 import * as FeishuNotifier from "./feishu-notifier";
 import { getSystemConfig } from "./system-config";
 import { buildTaskMap, evaluateTaskDependencies } from "./task-dependency";
+import { normalizeAgentId } from "./agent-id";
 
 const execFileAsync = promisify(execFile);
 
@@ -35,6 +36,12 @@ export async function dispatchTaskToAgent(
   }
 ): Promise<TaskDispatchResult> {
   const startTime = Date.now();
+  const normalizedAgentId = normalizeAgentId(agentId) || agentId;
+  if (normalizedAgentId !== agentId) {
+    console.log(`🔁 [Agent ID 归一化] ${agentId} -> ${normalizedAgentId}`);
+    agentId = normalizedAgentId;
+  }
+
   const systemConfig = getSystemConfig();
   const { waitForIdle = true, maxWait = systemConfig.taskDispatchWaitForIdleMaxSeconds * 1000, checkInterval = systemConfig.taskDispatchWaitCheckIntervalSeconds * 1000 } = options || {};
 
@@ -473,11 +480,12 @@ function parseJsonFromMixedOutput(output: string): any {
  */
 async function pingAgent(agentId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    console.log(`   🔄 [执行命令] openclaw agent --agent ${agentId} --message "ping" --json`);
+    const normalizedAgentId = normalizeAgentId(agentId) || agentId;
+    console.log(`   🔄 [执行命令] openclaw agent --agent ${normalizedAgentId} --message "ping" --json`);
 
     const { stdout, stderr } = await execFileAsync(
       "openclaw",
-      ["agent", "--agent", agentId, "--message", "ping", "--json"],
+      ["agent", "--agent", normalizedAgentId, "--message", "ping", "--json"],
       {
         timeout: 30000, // 30秒超时
         env: { ...process.env, FORCE_COLOR: "0" }
@@ -508,6 +516,7 @@ async function pingAgent(agentId: string): Promise<{ success: boolean; error?: s
  */
 async function getAgentStatus(agentId: string): Promise<{ idle: boolean; state: string; subagents?: any[] }> {
   try {
+    const normalizedAgentId = normalizeAgentId(agentId) || agentId;
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const response = await fetch(`${baseUrl}/api/agent-activity`, {
       method: 'GET',
@@ -519,10 +528,10 @@ async function getAgentStatus(agentId: string): Promise<{ idle: boolean; state: 
     }
 
     const data = await response.json();
-    const agent = data.agents?.find((a: any) => a.agentId === agentId);
+    const agent = data.agents?.find((a: any) => a.agentId === normalizedAgentId);
 
     if (!agent) {
-      console.error(`[getAgentStatus] Agent ${agentId} not found`);
+      console.error(`[getAgentStatus] Agent ${normalizedAgentId} not found`);
       return { idle: false, state: 'offline' };
     }
 
@@ -537,7 +546,8 @@ async function getAgentStatus(agentId: string): Promise<{ idle: boolean; state: 
       subagents: agent.subagents
     };
   } catch (error: any) {
-    console.error(`[getAgentStatus] Error checking ${agentId}:`, error.message);
+    const normalizedAgentId = normalizeAgentId(agentId) || agentId;
+    console.error(`[getAgentStatus] Error checking ${normalizedAgentId}:`, error.message);
     return { idle: false, state: 'offline' };
   }
 }
@@ -554,9 +564,10 @@ export async function checkAgentIdle(agentId: string): Promise<{ idle: boolean; 
  */
 export async function checkAgentAvailable(agentId: string): Promise<boolean> {
   try {
+    const normalizedAgentId = normalizeAgentId(agentId) || agentId;
     const { stdout } = await execFileAsync(
       "openclaw",
-      ["agent", "--agent", agentId, "--message", "ping", "--json"],
+      ["agent", "--agent", normalizedAgentId, "--message", "ping", "--json"],
       {
         timeout: 30000,
         env: { ...process.env, FORCE_COLOR: "0" }

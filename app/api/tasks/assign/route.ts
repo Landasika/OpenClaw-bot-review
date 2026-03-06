@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import * as FeishuNotifier from "@/lib/feishu-notifier";
 import { taskStore } from "@/lib/task-store";
+import { normalizeAgentId } from "@/lib/agent-id";
 import {
   loadTaskMap,
   resolveAssignmentStateByDependencies,
@@ -10,7 +11,9 @@ import {
 export async function POST(req: Request) {
   try {
     const { taskId, assignedTo } = await req.json();
-    const normalizedAssignedTo = typeof assignedTo === "string" ? assignedTo.trim() : "";
+    const normalizedAssignedTo = normalizeAgentId(
+      typeof assignedTo === "string" ? assignedTo.trim() : undefined
+    ) || "";
 
     if (!taskId || !normalizedAssignedTo) {
       return NextResponse.json(

@@ -7,6 +7,7 @@ import fs from "fs";
 import * as FeishuNotifier from "./feishu-notifier";
 import path from "path";
 import type { Task, TaskStatus } from "./task-types";
+import { normalizeAgentId } from "./agent-id";
 
 const PROJECT_ROOT = process.cwd();
 const TASKS_INDEX_FILE = path.join(PROJECT_ROOT, "data", "task.json");
@@ -56,7 +57,26 @@ export class TaskStore {
     }
     try {
       const raw = fs.readFileSync(TASKS_INDEX_FILE, "utf-8");
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return {};
+      }
+
+      const index = parsed as Record<string, Task>;
+      let changed = false;
+      for (const [taskId, task] of Object.entries(index)) {
+        if (!task || typeof task !== "object") continue;
+        const normalizedTask = this.normalizeTaskAgentIds(task as Task);
+        if (normalizedTask.changed) {
+          index[taskId] = normalizedTask.task;
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        this.saveIndex(index);
+      }
+      return index;
     } catch {
       return {};
     }
@@ -71,22 +91,48 @@ export class TaskStore {
     return `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
+  private normalizeTaskAgentIds(task: Task): { task: Task; changed: boolean } {
+    let changed = false;
+    const next: Task = { ...task };
+
+    if (typeof next.assignedTo === "string") {
+      const normalizedAssignedTo = normalizeAgentId(next.assignedTo);
+      const finalAssignedTo = normalizedAssignedTo || undefined;
+      if (next.assignedTo !== finalAssignedTo) {
+        if (finalAssignedTo) next.assignedTo = finalAssignedTo;
+        else delete next.assignedTo;
+        changed = true;
+      }
+    }
+
+    if (typeof next.createdBy === "string") {
+      const normalizedCreatedBy = normalizeAgentId(next.createdBy) || next.createdBy;
+      if (next.createdBy !== normalizedCreatedBy) {
+        next.createdBy = normalizedCreatedBy;
+        changed = true;
+      }
+    }
+
+    return { task: next, changed };
+  }
+
   async createTask(task: Task): Promise<Task> {
     const index = this.getIndex();
-    index[task.id] = task;
+    const normalizedTask = this.normalizeTaskAgentIds(task).task;
+    index[normalizedTask.id] = normalizedTask;
     this.saveIndex(index);
 
     // 如果任务被分配，通知员工
-    if (task.assignedTo && task.status === "assigned") {
+    if (normalizedTask.assignedTo && normalizedTask.status === "assigned") {
       FeishuNotifier.notifyTaskAssigned(
-        task.id,
-        task.title,
-        task.description,
-        task.assignedTo
+        normalizedTask.id,
+        normalizedTask.title,
+        normalizedTask.description,
+        normalizedTask.assignedTo
       ).catch(err => console.error("[Feishu] 通知失败:", err));
     }
 
-    return task;
+    return normalizedTask;
   }
 
   async getTask(taskId: string): Promise<Task | null> {
@@ -99,14 +145,22 @@ export class TaskStore {
     const task = index[taskId];
     if (!task) return null;
 
+    const normalizedUpdates: Partial<Task> = { ...updates };
+    if (Object.prototype.hasOwnProperty.call(normalizedUpdates, "assignedTo")) {
+      normalizedUpdates.assignedTo = normalizeAgentId(normalizedUpdates.assignedTo as string | undefined);
+    }
+    if (typeof normalizedUpdates.createdBy === "string") {
+      normalizedUpdates.createdBy = normalizeAgentId(normalizedUpdates.createdBy) || normalizedUpdates.createdBy;
+    }
+
     const updated = {
       ...task,
-      ...updates,
+      ...normalizedUpdates,
       updatedAt: Date.now(),
     };
-    index[taskId] = updated;
+    index[taskId] = this.normalizeTaskAgentIds(updated).task;
     this.saveIndex(index);
-    return updated;
+    return index[taskId];
   }
 
   async listTasks(filter?: {
@@ -119,14 +173,16 @@ export class TaskStore {
     let tasks = Object.values(index);
 
     if (filter) {
+      const assignedTo = normalizeAgentId(filter.assignedTo) || filter.assignedTo;
+      const createdBy = normalizeAgentId(filter.createdBy) || filter.createdBy;
       if (filter.status) {
         tasks = tasks.filter(t => t.status === filter.status);
       }
-      if (filter.assignedTo) {
-        tasks = tasks.filter(t => t.assignedTo === filter.assignedTo);
+      if (assignedTo) {
+        tasks = tasks.filter(t => t.assignedTo === assignedTo);
       }
-      if (filter.createdBy) {
-        tasks = tasks.filter(t => t.createdBy === filter.createdBy);
+      if (createdBy) {
+        tasks = tasks.filter(t => t.createdBy === createdBy);
       }
       const dependsOnTaskId = filter.dependsOnTaskId;
       if (dependsOnTaskId !== undefined) {
@@ -152,9 +208,10 @@ export class TaskStore {
     assigned: Task[];
   }> {
     const allTasks = await this.listTasks();
+    const normalizedAgentId = normalizeAgentId(agentId) || agentId;
     return {
-      created: allTasks.filter(t => t.createdBy === agentId),
-      assigned: allTasks.filter(t => t.assignedTo === agentId),
+      created: allTasks.filter(t => t.createdBy === normalizedAgentId),
+      assigned: allTasks.filter(t => t.assignedTo === normalizedAgentId),
     };
   }
 }

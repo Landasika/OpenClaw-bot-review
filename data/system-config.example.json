@@ -1,0 +1,87 @@
+{
+  "notificationEnabled": true,
+  "feishuNotificationEnabled": false,
+  "logLevel": "info",
+  "defaultAgent": "agent-boss",
+  "availableAgents": [
+    "agent-boss",
+    "agent-searcher",
+    "agent-osadmin",
+    "agent-coder",
+    "agent-docmanager"
+  ],
+  "agentDisplayNameMap": {
+    "agent-boss": "Boss",
+    "agent-searcher": "Searcher",
+    "agent-osadmin": "OS Admin",
+    "agent-coder": "Coder",
+    "agent-docmanager": "Doc Manager"
+  },
+  "accounts": {
+    "agent-boss": {
+      "description": "Admin account for review and system management"
+    },
+    "agent-searcher": {
+      "description": "Search specialist for research tasks"
+    },
+    "agent-osadmin": {
+      "description": "System operator for maintenance and configuration"
+    },
+    "agent-coder": {
+      "description": "Developer account for implementation tasks"
+    },
+    "agent-docmanager": {
+      "description": "Documentation account for content management"
+    }
+  },
+  "gatewayDefaultPort": 18789,
+  "taskDispatchEnabled": true,
+  "taskDispatchMaxConcurrent": 3,
+  "taskDispatchIntervalSeconds": 60,
+  "taskDispatchMaxRetries": 3,
+  "taskDispatchRetryDelaySeconds": 300,
+  "taskDispatchWaitForIdleMaxSeconds": 600,
+  "taskDispatchWaitCheckIntervalSeconds": 30,
+  "bossReviewEnabled": true,
+  "bossReviewIntervalSeconds": 30,
+  "bossReviewMaxConcurrent": 2,
+  "alertsDefaultCheckIntervalMinutes": 10,
+  "agentActivitySessionLookbackDays": 7,
+  "agentActivityMaxParentSessionsToParse": 40,
+  "agentActivityOrphanFallbackWindowMinutes": 15,
+  "agentActivitySubagentMaxActiveMinutes": 30,
+  "alertsDefaultRules": [
+    {
+      "id": "model_unavailable",
+      "name": "Model Unavailable",
+      "enabled": false
+    },
+    {
+      "id": "bot_no_response",
+      "name": "Bot Long Time No Response",
+      "enabled": false,
+      "threshold": 300
+    },
+    {
+      "id": "message_failure_rate",
+      "name": "Message Failure Rate High",
+      "enabled": false,
+      "threshold": 50
+    },
+    {
+      "id": "cron_continuous_failure",
+      "name": "Cron Continuous Failure",
+      "enabled": false,
+      "threshold": 3
+    }
+  ],
+  "feishuDefaultChatId": "oc_replace_with_real_chat_id",
+  "feishuBotScriptPath": "scripts/feishu_bot_send.py",
+  "feishuBotMap": {
+    "agent-boss": "boss",
+    "agent-searcher": "searcher",
+    "agent-osadmin": "osadmin",
+    "agent-coder": "coder",
+    "agent-docmanager": "docmanager"
+  }
+}

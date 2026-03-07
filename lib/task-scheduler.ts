@@ -2,7 +2,9 @@
  * 任务调度器 - 通过 openclaw agent 命令调度员工执行任务
  */
 
+import fs from "fs";
 import { execFile } from "child_process";
+import path from "path";
 import { promisify } from "util";
 import { taskStore } from "./task-store";
 import * as FeishuNotifier from "./feishu-notifier";
@@ -11,6 +13,21 @@ import { buildTaskMap, evaluateTaskDependencies } from "./task-dependency";
 import { normalizeAgentId } from "./agent-id";
 
 const execFileAsync = promisify(execFile);
+const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(process.env.HOME || "", ".openclaw");
+const CONTEXT_WINDOW_EXCEEDED_MARKERS = [
+  "model_context_window_exceeded",
+  "context_window_exceeded",
+  "context window exceeded",
+];
+
+type AgentCommandResult = {
+  responseText: string;
+  parsedOutput: any;
+  combinedOutput: string;
+  contextWindowExceeded: boolean;
+  failed: boolean;
+  errorMessage?: string;
+};
 
 export interface TaskDispatchResult {
   success: boolean;
@@ -20,6 +37,163 @@ export interface TaskDispatchResult {
   error?: string;
   duration?: number;
   timestamp: number;
+}
+
+function includesContextWindowExceeded(input: string): boolean {
+  if (!input) return false;
+  const normalized = input.toLowerCase();
+  return CONTEXT_WINDOW_EXCEEDED_MARKERS.some((marker) => normalized.includes(marker));
+}
+
+function collectResponseTextsFromParsedOutput(parsedOutput: any): string[] {
+  const parts: string[] = [];
+
+  if (Array.isArray(parsedOutput?.result?.payloads)) {
+    for (const payload of parsedOutput.result.payloads) {
+      if (typeof payload?.text === "string" && payload.text.trim() !== "") {
+        parts.push(payload.text.trim());
+      }
+    }
+  }
+
+  if (typeof parsedOutput?.summary === "string" && parsedOutput.summary.trim() !== "") {
+    parts.push(parsedOutput.summary.trim());
+  } else if (parsedOutput?.summary && typeof parsedOutput.summary === "object") {
+    parts.push(JSON.stringify(parsedOutput.summary));
+  }
+
+  if (typeof parsedOutput?.result === "string" && parsedOutput.result.trim() !== "") {
+    parts.push(parsedOutput.result.trim());
+  }
+
+  if (typeof parsedOutput?.message === "string" && parsedOutput.message.trim() !== "") {
+    parts.push(parsedOutput.message.trim());
+  }
+
+  return parts;
+}
+
+function parseAgentResponse(combinedOutput: string): { responseText: string; parsedOutput: any } {
+  try {
+    const parsedOutputs = parseJsonObjectsFromMixedOutput(combinedOutput);
+    if (parsedOutputs.length === 0) {
+      return { responseText: combinedOutput.trim(), parsedOutput: null };
+    }
+
+    const lastParsedOutput = parsedOutputs[parsedOutputs.length - 1];
+    const rawParts = parsedOutputs.flatMap((output) => collectResponseTextsFromParsedOutput(output));
+
+    // 去掉空串并去除相邻重复段，避免重复通知内容
+    const dedupedParts: string[] = [];
+    for (const part of rawParts) {
+      const normalized = part.trim();
+      if (!normalized) continue;
+      if (dedupedParts[dedupedParts.length - 1] === normalized) continue;
+      dedupedParts.push(normalized);
+    }
+
+    if (dedupedParts.length > 0) {
+      return { responseText: dedupedParts.join("\n\n"), parsedOutput: lastParsedOutput };
+    }
+
+    return { responseText: combinedOutput.trim(), parsedOutput: lastParsedOutput };
+  } catch {
+    return { responseText: combinedOutput.trim(), parsedOutput: null };
+  }
+}
+
+async function runOpenclawAgentCommand(agentId: string, message: string): Promise<AgentCommandResult> {
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      "openclaw",
+      [
+        "agent",
+        "--agent",
+        agentId,
+        "--message",
+        message,
+        "--json"
+      ],
+      {
+        timeout: 600000, // 10分钟超时
+        env: {
+          ...process.env,
+          FORCE_COLOR: "0"
+        }
+      }
+    );
+
+    const combinedOutput = `${stdout}\n${stderr || ""}`;
+    const { responseText, parsedOutput } = parseAgentResponse(combinedOutput);
+    const parsedJsonText = parsedOutput ? JSON.stringify(parsedOutput) : "";
+    const contextWindowExceeded = includesContextWindowExceeded(responseText)
+      || includesContextWindowExceeded(combinedOutput)
+      || includesContextWindowExceeded(parsedJsonText);
+
+    return {
+      responseText,
+      parsedOutput,
+      combinedOutput,
+      contextWindowExceeded,
+      failed: false,
+    };
+  } catch (error: any) {
+    const stdout = error?.stdout ? String(error.stdout) : "";
+    const stderr = error?.stderr ? String(error.stderr) : "";
+    const combinedOutput = `${stdout}\n${stderr}`.trim();
+    const fallbackText = combinedOutput || error?.message || String(error);
+    const contextWindowExceeded = includesContextWindowExceeded(fallbackText);
+
+    return {
+      responseText: fallbackText,
+      parsedOutput: null,
+      combinedOutput,
+      contextWindowExceeded,
+      failed: true,
+      errorMessage: error?.message || String(error),
+    };
+  }
+}
+
+function resetAgentMainSession(agentId: string): {
+  success: boolean;
+  removed: boolean;
+  sessionId?: string;
+  error?: string;
+} {
+  try {
+    const sessionsPath = path.join(OPENCLAW_HOME, "agents", agentId, "sessions", "sessions.json");
+    if (!fs.existsSync(sessionsPath)) {
+      return { success: false, removed: false, error: `会话索引不存在: ${sessionsPath}` };
+    }
+
+    const raw = fs.readFileSync(sessionsPath, "utf-8");
+    const sessions = JSON.parse(raw);
+    if (!sessions || typeof sessions !== "object" || Array.isArray(sessions)) {
+      return { success: false, removed: false, error: "sessions.json 格式非法" };
+    }
+
+    const mainSessionKey = `agent:${agentId}:main`;
+    const existing = sessions[mainSessionKey];
+    if (!existing) {
+      return { success: true, removed: false };
+    }
+
+    delete sessions[mainSessionKey];
+    fs.writeFileSync(sessionsPath, JSON.stringify(sessions, null, 2));
+
+    return {
+      success: true,
+      removed: true,
+      sessionId: typeof existing.sessionId === "string" ? existing.sessionId : undefined,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      removed: false,
+      error: error?.message || String(error),
+    };
+  }
 }
 
 /**
@@ -222,45 +396,35 @@ export async function dispatchTaskToAgent(
     console.log(`🤖 [执行命令] openclaw agent --agent ${agentId}`);
     console.log('');
 
-    // 7. 调用 openclaw agent 命令
-    const { stdout, stderr } = await execFileAsync(
-      "openclaw",
-      [
-        "agent",
-        "--agent",
-        agentId,
-        "--message",
-        message,
-        "--json"
-      ],
-      {
-        timeout: 600000, // 10分钟超时
-        env: {
-          ...process.env,
-          FORCE_COLOR: "0"
+    // 7. 调用 openclaw agent 命令（遇到上下文超限自动重置会话并重试一次）
+    let commandResult = await runOpenclawAgentCommand(agentId, message);
+
+    if (commandResult.contextWindowExceeded) {
+      console.log(`⚠️  [上下文超限] ${agentId} 触发 model_context_window_exceeded，准备重置会话并重试一次`);
+      const resetResult = resetAgentMainSession(agentId);
+      if (resetResult.success) {
+        if (resetResult.removed) {
+          console.log(`🔄 [会话重置] 已清理主会话: ${resetResult.sessionId || "unknown"}`);
+        } else {
+          console.log(`ℹ️  [会话重置] 未找到主会话映射，直接重试`);
         }
-      }
-    );
-
-    // 8. 解析响应
-    let responseText = "";
-    let parsedOutput: any = null;
-
-    // 尝试解析 JSON 输出
-    const combinedOutput = `${stdout}\n${stderr || ""}`;
-    try {
-      parsedOutput = parseJsonFromMixedOutput(combinedOutput);
-      if (parsedOutput?.result?.payloads?.[0]?.text) {
-        responseText = parsedOutput.result.payloads[0].text;
-      } else if (parsedOutput?.summary) {
-        responseText = JSON.stringify(parsedOutput.summary);
       } else {
-        responseText = combinedOutput.trim();
+        console.log(`❌ [会话重置失败] ${resetResult.error}`);
+        console.log(`ℹ️  [重试继续] 会话重置失败，仍执行一次重试`);
       }
-    } catch {
-      // JSON 解析失败，使用原始输出
-      responseText = combinedOutput.trim();
+      commandResult = await runOpenclawAgentCommand(agentId, message);
     }
+
+    if (commandResult.failed) {
+      throw new Error(commandResult.errorMessage || commandResult.responseText || "openclaw agent command failed");
+    }
+
+    if (commandResult.contextWindowExceeded) {
+      console.log(`⚠️  [重试后仍超限] ${agentId} 响应仍包含 context window exceeded`);
+    }
+
+    // 8. 解析后的最终响应文本
+    const responseText = commandResult.responseText;
 
     const duration = Date.now() - startTime;
 
@@ -423,12 +587,19 @@ export async function autoDispatchPendingTasks(limit = 5): Promise<{
 }
 
 /**
- * 从混合输出中解析JSON
+ * 从混合输出中解析所有 JSON 对象（按出现顺序）
  */
-function parseJsonFromMixedOutput(output: string): any {
-  for (let i = 0; i < output.length; i++) {
-    if (output[i] !== "{") continue;
+function parseJsonObjectsFromMixedOutput(output: string): any[] {
+  const parsedObjects: any[] = [];
+  let i = 0;
 
+  while (i < output.length) {
+    if (output[i] !== "{") {
+      i++;
+      continue;
+    }
+
+    let parsedOne = false;
     let depth = 0;
     let inString = false;
     let escaped = false;
@@ -461,16 +632,23 @@ function parseJsonFromMixedOutput(output: string): any {
           try {
             const parsed = JSON.parse(candidate);
             if (parsed && typeof parsed === "object") {
-              return parsed;
+              parsedObjects.push(parsed);
+              i = j + 1;
+              parsedOne = true;
+              break;
             }
           } catch {}
           break;
         }
       }
     }
+
+    if (!parsedOne) {
+      i++;
+    }
   }
 
-  throw new Error("Failed to parse JSON from output");
+  return parsedObjects;
 }
 
 /**

@@ -8,6 +8,26 @@ interface SystemConfigData {
   agentDisplayNameMap?: Record<string, string>;
 }
 
+const STATUS_LABEL_MAP: Record<string, string> = {
+  all: "全部",
+  pending: "待处理",
+  assigned: "已分配",
+  blocked: "已阻塞",
+  in_progress: "进行中",
+  submitted: "待审查",
+  approved: "已通过",
+  rejected: "已驳回",
+  cancelled: "已取消",
+  missing: "未知",
+};
+
+const PRIORITY_LABEL_MAP: Record<string, string> = {
+  low: "低",
+  medium: "中",
+  high: "高",
+  urgent: "紧急",
+};
+
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -20,6 +40,12 @@ export default function TasksPage() {
   const [dependencyDraft, setDependencyDraft] = useState<string[]>([]);
   const [dependencySaving, setDependencySaving] = useState(false);
   const [dependencyMessage, setDependencyMessage] = useState<string | null>(null);
+  const [redispatchingTaskId, setRedispatchingTaskId] = useState<string | null>(null);
+  const [redispatchMessage, setRedispatchMessage] = useState<string | null>(null);
+  const [redispatchMessageTaskId, setRedispatchMessageTaskId] = useState<string | null>(null);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
+  const [bulkActionRunning, setBulkActionRunning] = useState<"redispatch" | "delete" | null>(null);
+  const [bulkActionMessage, setBulkActionMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
   // 新任务表单
   const [newTask, setNewTask] = useState({
@@ -77,7 +103,11 @@ export default function TasksPage() {
       ]);
 
       if (filteredData.success) {
-        setTasks(filteredData.tasks);
+        const filteredTasks = filteredData.tasks as Task[];
+        setTasks(filteredTasks);
+        setSelectedTaskIds((prev) =>
+          prev.filter((id) => filteredTasks.some((task) => task.id === id))
+        );
       }
       if (allData.success) {
         setAllTasksForDependency(allData.tasks);
@@ -161,6 +191,212 @@ export default function TasksPage() {
     }
   };
 
+  const performRedispatch = async (task: Task): Promise<{ success: true; task: Task } | { success: false; error: string }> => {
+    if (!task.assignedTo) {
+      return { success: false, error: "任务未分配执行人，无法重新下发" };
+    }
+
+    try {
+      let latestTask = task;
+      if (!["assigned", "blocked"].includes(task.status)) {
+        const patchRes = await fetch(`/api/tasks/${task.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            status: "assigned",
+            assignedTo: task.assignedTo,
+          }),
+        });
+        const patchData = await patchRes.json();
+        if (!patchData.success) {
+          return { success: false, error: patchData.error || "任务状态更新失败" };
+        }
+        latestTask = patchData.task;
+      }
+
+      const dispatchRes = await fetch("/api/tasks/dispatch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskId: latestTask.id,
+          waitForIdle: true,
+        }),
+      });
+      const dispatchData = await dispatchRes.json();
+      if (!dispatchData.success) {
+        return {
+          success: false,
+          error: dispatchData.dispatch?.error || dispatchData.error || "重新下发失败",
+        };
+      }
+
+      return { success: true, task: dispatchData.task || latestTask };
+    } catch (error: any) {
+      return { success: false, error: error.message || "重新下发失败" };
+    }
+  };
+
+  const redispatchTask = async (task: Task, options?: { syncSelectedTask?: boolean; reload?: boolean }) => {
+    setRedispatchingTaskId(task.id);
+    setRedispatchMessageTaskId(task.id);
+    setRedispatchMessage(null);
+
+    const result = await performRedispatch(task);
+    if (!result.success) {
+      setRedispatchMessageTaskId(task.id);
+      setRedispatchMessage(result.error);
+      setRedispatchingTaskId(null);
+      return;
+    }
+
+    if (options?.syncSelectedTask !== false || selectedTask?.id === result.task.id) {
+      setSelectedTask(result.task);
+    }
+    setRedispatchMessage("任务已重新下发");
+
+    if (options?.reload !== false) {
+      await loadTasks();
+    }
+
+    setRedispatchingTaskId(null);
+  };
+
+  const selectedTaskIdSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds]);
+  const selectedTasks = useMemo(
+    () => tasks.filter((task) => selectedTaskIdSet.has(task.id)),
+    [tasks, selectedTaskIdSet]
+  );
+  const allVisibleSelected = tasks.length > 0 && tasks.every((task) => selectedTaskIdSet.has(task.id));
+
+  const toggleTaskSelection = (taskId: string) => {
+    setBulkActionMessage(null);
+    setSelectedTaskIds((prev) =>
+      prev.includes(taskId)
+        ? prev.filter((id) => id !== taskId)
+        : [...prev, taskId]
+    );
+  };
+
+  const toggleSelectAllVisible = () => {
+    if (tasks.length === 0) {
+      return;
+    }
+    const visibleIds = tasks.map((task) => task.id);
+    setBulkActionMessage(null);
+    setSelectedTaskIds((prev) => {
+      const allSelected = visibleIds.every((id) => prev.includes(id));
+      if (allSelected) {
+        return prev.filter((id) => !visibleIds.includes(id));
+      }
+      return Array.from(new Set([...prev, ...visibleIds]));
+    });
+  };
+
+  const bulkRedispatchTasks = async () => {
+    if (selectedTasks.length === 0) {
+      setBulkActionMessage({ text: "请先选择任务", type: "error" });
+      return;
+    }
+
+    setBulkActionRunning("redispatch");
+    setBulkActionMessage(null);
+
+    let successCount = 0;
+    let skipCount = 0;
+    let failCount = 0;
+    let firstError = "";
+    const succeededTaskIds: string[] = [];
+
+    for (const task of selectedTasks) {
+      if (!task.assignedTo || ["in_progress", "submitted"].includes(task.status)) {
+        skipCount += 1;
+        continue;
+      }
+
+      const result = await performRedispatch(task);
+      if (result.success) {
+        successCount += 1;
+        succeededTaskIds.push(task.id);
+      } else {
+        failCount += 1;
+        if (!firstError) {
+          firstError = `${task.title}: ${result.error}`;
+        }
+      }
+    }
+
+    await loadTasks();
+    if (succeededTaskIds.length > 0) {
+      setSelectedTaskIds((prev) => prev.filter((id) => !succeededTaskIds.includes(id)));
+    }
+
+    const summary = `批量重新下发完成：成功 ${successCount}，跳过 ${skipCount}，失败 ${failCount}${
+      firstError ? `。示例失败：${firstError}` : ""
+    }`;
+    setBulkActionMessage({
+      text: summary,
+      type: failCount > 0 ? "error" : "success",
+    });
+    setBulkActionRunning(null);
+  };
+
+  const bulkDeleteTasks = async () => {
+    if (selectedTasks.length === 0) {
+      setBulkActionMessage({ text: "请先选择任务", type: "error" });
+      return;
+    }
+
+    const confirmed = window.confirm(`确认删除已选 ${selectedTasks.length} 个任务吗？该操作不可恢复。`);
+    if (!confirmed) {
+      return;
+    }
+
+    setBulkActionRunning("delete");
+    setBulkActionMessage(null);
+
+    let successCount = 0;
+    let failCount = 0;
+    let firstError = "";
+    const deletedTaskIds: string[] = [];
+
+    for (const task of selectedTasks) {
+      try {
+        const res = await fetch(`/api/tasks/${task.id}`, {
+          method: "DELETE",
+        });
+        const data = await res.json();
+        if (data.success) {
+          successCount += 1;
+          deletedTaskIds.push(task.id);
+        } else {
+          failCount += 1;
+          if (!firstError) {
+            firstError = `${task.title}: ${data.error || "删除失败"}`;
+          }
+        }
+      } catch (error: any) {
+        failCount += 1;
+        if (!firstError) {
+          firstError = `${task.title}: ${error.message || "删除失败"}`;
+        }
+      }
+    }
+
+    await loadTasks();
+    if (deletedTaskIds.length > 0) {
+      setSelectedTaskIds((prev) => prev.filter((id) => !deletedTaskIds.includes(id)));
+    }
+
+    const summary = `批量删除完成：成功 ${successCount}，失败 ${failCount}${
+      firstError ? `。示例失败：${firstError}` : ""
+    }`;
+    setBulkActionMessage({
+      text: summary,
+      type: failCount > 0 ? "error" : "success",
+    });
+    setBulkActionRunning(null);
+  };
+
   const saveDependencies = async () => {
     if (!selectedTask) {
       return;
@@ -191,34 +427,38 @@ export default function TasksPage() {
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
-      pending: "bg-gray-100 text-gray-800",
-      assigned: "bg-blue-100 text-blue-800",
-      in_progress: "bg-yellow-100 text-yellow-800",
-      submitted: "bg-purple-100 text-purple-800",
-      approved: "bg-green-100 text-green-800",
-      rejected: "bg-red-100 text-red-800",
-      blocked: "bg-orange-100 text-orange-800",
-      cancelled: "bg-gray-100 text-gray-800",
+      pending: "bg-slate-700 text-white",
+      assigned: "bg-blue-700 text-white",
+      in_progress: "bg-amber-700 text-white",
+      submitted: "bg-indigo-700 text-white",
+      approved: "bg-green-700 text-white",
+      rejected: "bg-red-700 text-white",
+      blocked: "bg-orange-700 text-white",
+      cancelled: "bg-zinc-700 text-white",
+      missing: "bg-gray-700 text-white",
     };
-    return colors[status] || "bg-gray-100 text-gray-800";
+    return colors[status] || "bg-gray-700 text-white";
   };
 
   const getPriorityColor = (priority: string) => {
     const colors: Record<string, string> = {
-      low: "bg-gray-200 text-gray-700",
-      medium: "bg-blue-200 text-blue-700",
-      high: "bg-orange-200 text-orange-700",
-      urgent: "bg-red-200 text-red-700",
+      low: "bg-slate-700 text-white",
+      medium: "bg-sky-700 text-white",
+      high: "bg-orange-700 text-white",
+      urgent: "bg-red-800 text-white",
     };
-    return colors[priority] || "bg-gray-200 text-gray-700";
+    return colors[priority] || "bg-slate-700 text-white";
   };
+
+  const getStatusLabel = (status: string) => STATUS_LABEL_MAP[status] || status;
+  const getPriorityLabel = (priority: string) => PRIORITY_LABEL_MAP[priority] || priority;
 
   const taskMap = useMemo(() => {
     return new Map(allTasksForDependency.map((task) => [task.id, task]));
   }, [allTasksForDependency]);
 
   if (loading) {
-    return <div className="p-8 text-center">Loading...</div>;
+    return <div className="p-8 text-center">加载中...</div>;
   }
 
   return (
@@ -239,15 +479,53 @@ export default function TasksPage() {
           <button
             key={status}
             onClick={() => setFilter(status)}
-            className={`px-3 py-1 rounded ${
+            className={`px-3 py-1 rounded border text-sm font-medium transition-colors ${
               filter === status
-                ? "bg-blue-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                ? "bg-blue-700 text-white border-blue-800"
+                : "bg-gray-100 text-gray-900 border-gray-400 hover:bg-gray-200"
             }`}
           >
-            {status === "all" ? "全部" : status}
+            {getStatusLabel(status)}
           </button>
         ))}
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2">
+        <label className="inline-flex items-center gap-2 text-sm text-[var(--text)]">
+          <input
+            type="checkbox"
+            checked={allVisibleSelected}
+            onChange={toggleSelectAllVisible}
+            disabled={tasks.length === 0 || bulkActionRunning !== null}
+          />
+          全选当前列表
+        </label>
+
+        <span className="text-xs text-[var(--text-muted)]">已选 {selectedTaskIds.length} 项</span>
+
+        <button
+          type="button"
+          onClick={bulkRedispatchTasks}
+          disabled={selectedTaskIds.length === 0 || bulkActionRunning !== null}
+          className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm"
+        >
+          {bulkActionRunning === "redispatch" ? "批量重新下发中..." : "批量重新下发"}
+        </button>
+
+        <button
+          type="button"
+          onClick={bulkDeleteTasks}
+          disabled={selectedTaskIds.length === 0 || bulkActionRunning !== null}
+          className="px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 text-sm"
+        >
+          {bulkActionRunning === "delete" ? "批量删除中..." : "批量删除"}
+        </button>
+
+        {bulkActionMessage && (
+          <span className={`text-xs ${bulkActionMessage.type === "error" ? "text-red-600" : "text-green-600"}`}>
+            {bulkActionMessage.text}
+          </span>
+        )}
       </div>
 
       {/* 任务列表 */}
@@ -257,47 +535,66 @@ export default function TasksPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {tasks.map((task) => (
-            <button
-              key={task.id}
-              type="button"
-              className="group rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 text-left transition-all hover:border-[var(--accent)]/50 hover:shadow-lg"
-              onClick={() => setSelectedTask(task)}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--text)]">
-                  {task.title}
-                </h3>
-                <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] ${getPriorityColor(task.priority)}`}>
-                  {task.priority}
-                </span>
-              </div>
-
-              <p className="mt-1 h-8 overflow-hidden text-xs leading-4 text-[var(--text-muted)]">
-                {task.description || "无描述"}
-              </p>
-
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                <span className={`rounded px-1.5 py-0.5 text-[11px] ${getStatusColor(task.status)}`}>
-                  {task.status}
-                </span>
-                <span className="rounded border border-[var(--border)] bg-[var(--bg)] px-1.5 py-0.5 text-[11px] text-[var(--text-muted)]">
-                  {task.assignedTo ? `👤 ${agentDisplayNameMap[task.assignedTo] || task.assignedTo}` : "👤 未分配"}
-                </span>
-              </div>
-
-              <div className="mt-2 space-y-0.5 text-[11px] text-[var(--text-muted)]">
-                <div>创建: {new Date(task.createdAt).toLocaleString("zh-CN")}</div>
-                {task.dueDate && <div>截止: {new Date(task.dueDate).toLocaleString("zh-CN")}</div>}
-              </div>
-
-              {task.status === "blocked" && task.blockedReason && (
-                <div className="mt-2 rounded border border-orange-300/40 bg-orange-100/70 px-1.5 py-0.5 text-[11px] text-orange-800">
-                  阻塞: {task.blockedReason}
+          {tasks.map((task) => {
+            const checked = selectedTaskIdSet.has(task.id);
+            return (
+              <div
+                key={task.id}
+                className="group rounded-xl border border-[var(--border)] bg-[var(--card)] transition-all hover:border-[var(--accent)]/50 hover:shadow-lg"
+              >
+                <div className="border-b border-[var(--border)] px-3 py-2">
+                  <label className="inline-flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleTaskSelection(task.id)}
+                      disabled={bulkActionRunning !== null}
+                    />
+                    选择任务
+                  </label>
                 </div>
-              )}
-            </button>
-          ))}
+
+                <button
+                  type="button"
+                  className="w-full p-3 text-left"
+                  onClick={() => setSelectedTask(task)}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--text)]">
+                      {task.title}
+                    </h3>
+                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] ${getPriorityColor(task.priority)}`}>
+                      {getPriorityLabel(task.priority)}
+                    </span>
+                  </div>
+
+                  <p className="mt-1 h-8 overflow-hidden text-xs leading-4 text-[var(--text-muted)]">
+                    {task.description || "无描述"}
+                  </p>
+
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <span className={`rounded px-1.5 py-0.5 text-[11px] ${getStatusColor(task.status)}`}>
+                      {getStatusLabel(task.status)}
+                    </span>
+                    <span className="rounded border border-[var(--border)] bg-[var(--bg)] px-1.5 py-0.5 text-[11px] text-[var(--text-muted)]">
+                      {task.assignedTo ? `👤 ${agentDisplayNameMap[task.assignedTo] || task.assignedTo}` : "👤 未分配"}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 space-y-0.5 text-[11px] text-[var(--text-muted)]">
+                    <div>创建: {new Date(task.createdAt).toLocaleString("zh-CN")}</div>
+                    {task.dueDate && <div>截止: {new Date(task.dueDate).toLocaleString("zh-CN")}</div>}
+                  </div>
+
+                  {task.status === "blocked" && task.blockedReason && (
+                    <div className="mt-2 rounded border border-orange-300/40 bg-orange-100/70 px-1.5 py-0.5 text-[11px] text-orange-800">
+                      阻塞: {task.blockedReason}
+                    </div>
+                  )}
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -375,12 +672,12 @@ export default function TasksPage() {
                   >
                     {allTasksForDependency.map((task) => (
                       <option key={task.id} value={task.id}>
-                        {task.title} ({task.status})
+                        {task.title}（{getStatusLabel(task.status)}）
                       </option>
                     ))}
                   </select>
                   <p className="text-xs text-gray-500 mt-1">
-                    按住 Ctrl/Cmd 可多选。只有依赖任务全部 approved 后，此任务才会被调度。
+                    按住 Ctrl/Cmd 可多选。只有依赖任务全部“已通过”后，此任务才会被调度。
                   </p>
                 </div>
               </div>
@@ -422,13 +719,13 @@ export default function TasksPage() {
                 <div>
                   <span className="font-medium">状态:</span>
                   <span className={`ml-2 px-2 py-1 rounded text-xs ${getStatusColor(selectedTask.status)}`}>
-                    {selectedTask.status}
+                    {getStatusLabel(selectedTask.status)}
                   </span>
                 </div>
                 <div>
                   <span className="font-medium">优先级:</span>
                   <span className={`ml-2 px-2 py-1 rounded text-xs ${getPriorityColor(selectedTask.priority)}`}>
-                    {selectedTask.priority}
+                    {getPriorityLabel(selectedTask.priority)}
                   </span>
                 </div>
                 <div>
@@ -441,6 +738,25 @@ export default function TasksPage() {
                 </div>
               </div>
 
+              {selectedTask.assignedTo && !["in_progress", "submitted"].includes(selectedTask.status) && (
+                <div className="rounded border border-blue-200 bg-blue-50 p-3">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => redispatchTask(selectedTask)}
+                      disabled={redispatchingTaskId === selectedTask.id}
+                      className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm"
+                    >
+                      {redispatchingTaskId === selectedTask.id ? "重新下发中..." : "重新下发"}
+                    </button>
+                    {redispatchMessage && redispatchMessageTaskId === selectedTask.id && (
+                      <span className={`text-xs ${redispatchMessage.includes("失败") || redispatchMessage.includes("无法") ? "text-red-600" : "text-green-600"}`}>
+                        {redispatchMessage}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <h3 className="font-medium mb-1">依赖任务</h3>
                 {selectedTask.dependsOnTaskIds && selectedTask.dependsOnTaskIds.length > 0 ? (
@@ -452,7 +768,7 @@ export default function TasksPage() {
                         <div key={depId} className="text-sm text-gray-700 flex items-center gap-2">
                           <span>{depTask?.title || depId}</span>
                           <span className={`px-2 py-0.5 rounded text-xs ${getStatusColor(depStatus)}`}>
-                            {depStatus}
+                            {getStatusLabel(depStatus)}
                           </span>
                         </div>
                       );
@@ -480,7 +796,7 @@ export default function TasksPage() {
                       .filter((task) => task.id !== selectedTask.id)
                       .map((task) => (
                         <option key={task.id} value={task.id}>
-                          {task.title} ({task.status})
+                          {task.title}（{getStatusLabel(task.status)}）
                         </option>
                       ))}
                   </select>

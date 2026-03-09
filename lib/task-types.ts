@@ -5,11 +5,27 @@
 export type TaskStatus = "pending" | "assigned" | "blocked" | "in_progress" | "submitted" | "approved" | "rejected" | "cancelled";
 
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
+export type TaskAcceptanceChecklistStatus = "done" | "partial" | "not_done";
+
+export interface TaskAcceptanceChecklistItem {
+  criterion: string;
+  status: TaskAcceptanceChecklistStatus;
+  evidence: string;
+}
+
+export interface TaskResultDetails {
+  summary: string;
+  implementation: string;
+  verification: string;
+  risks: string;
+  acceptanceChecklist: TaskAcceptanceChecklistItem[];
+}
 
 export interface Task {
   id: string;
   title: string;
   description: string;
+  acceptanceCriteria?: string;
   status: TaskStatus;
   priority: TaskPriority;
   assignedTo?: string; // 员工agent ID
@@ -22,6 +38,7 @@ export interface Task {
   startedAt?: number;
   completedAt?: number;
   result?: string; // 员工填写的结果
+  resultDetails?: TaskResultDetails;
   attachments?: string[]; // 结果附件URL
 
   // 审查相关
@@ -44,6 +61,7 @@ export interface Task {
 export interface CreateTaskRequest {
   title: string;
   description: string;
+  acceptanceCriteria?: string;
   priority?: TaskPriority;
   assignedTo?: string;
   dueDate?: number;
@@ -59,7 +77,11 @@ export interface AssignTaskRequest {
 
 export interface UpdateTaskResultRequest {
   taskId: string;
-  result: string;
+  summary: string;
+  implementation: string;
+  verification: string;
+  risks: string;
+  acceptanceChecklist: TaskAcceptanceChecklistItem[];
   attachments?: string[];
   actualHours?: number;
 }

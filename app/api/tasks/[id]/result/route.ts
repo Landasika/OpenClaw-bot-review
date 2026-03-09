@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { normalizeTaskResultSubmission } from "@/lib/task-result";
 import { taskStore } from "@/lib/task-store";
 
 // POST /api/tasks/[id]/result - 员工提交任务执行结果
@@ -8,14 +9,7 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const { result, attachments, actualHours } = await req.json();
-
-    if (!result) {
-      return NextResponse.json(
-        { success: false, error: "Missing required field: result" },
-        { status: 400 }
-      );
-    }
+    const body = await req.json();
 
     const task = await taskStore.getTask(id);
     if (!task) {
@@ -34,12 +28,15 @@ export async function POST(
       );
     }
 
+    const submission = normalizeTaskResultSubmission(body, task);
+
     const now = Date.now();
     const updated = await taskStore.updateTask(id, {
       status: "submitted",
-      result,
-      attachments: attachments || [],
-      actualHours,
+      result: submission.result,
+      resultDetails: submission.resultDetails,
+      attachments: submission.attachments,
+      actualHours: submission.actualHours,
       completedAt: now,
     });
 
@@ -49,9 +46,11 @@ export async function POST(
       message: "Task result submitted for review",
     });
   } catch (err: any) {
+    const message = err.message || "Unknown error";
+    const status = /不能为空|必须|缺少|不能提交|格式不正确/.test(message) ? 400 : 500;
     return NextResponse.json(
-      { success: false, error: err.message },
-      { status: 500 }
+      { success: false, error: message },
+      { status }
     );
   }
 }

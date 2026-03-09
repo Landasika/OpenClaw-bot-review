@@ -7,6 +7,7 @@
 import { startTaskScheduler } from "@/lib/task-scheduler-service";
 import { startBossReviewer } from "@/lib/task-scheduler-extended";
 import { startMeetingService } from "@/lib/meeting-service";
+import { resumeEpicLoopsOnBoot } from "@/lib/epic-loop-service";
 import { getSystemConfig } from "@/lib/system-config";
 
 declare global {
@@ -56,11 +57,17 @@ export function initTaskAutomation(): void {
   // 启动团队会议服务（按设定时间自动开会）
   startMeetingService();
 
+  // 恢复运行中的大项迭代循环
+  resumeEpicLoopsOnBoot().catch((error) => {
+    console.error("[EpicLoop] 恢复循环失败:", error);
+  });
+
   console.log("=".repeat(60));
   console.log("✅ [应用初始化] 服务已启动");
   console.log(`   📋 任务调度器: 每 ${cfg.taskDispatchIntervalSeconds} 秒检查待调度任务`);
   console.log(`   👑 Boss 审查器: 每 ${cfg.bossReviewIntervalSeconds} 秒检查待审查任务`);
   console.log(`   🗓️  会议服务: 每天 ${cfg.meetingDailyTime} (${cfg.meetingTimezone})`);
+  console.log("   🎯 大项迭代: 已尝试恢复运行中的大项循环");
   console.log("=".repeat(60));
   console.log("");
 }

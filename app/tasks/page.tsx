@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { extractAcceptanceCriteria } from "../../lib/task-acceptance";
+import { getChecklistCompletion, getChecklistStatusLabel } from "../../lib/task-result";
 import type { Task } from "../../lib/task-types";
 
 interface SystemConfigData {
@@ -28,6 +30,8 @@ const PRIORITY_LABEL_MAP: Record<string, string> = {
   urgent: "紧急",
 };
 
+const TASKS_POLL_INTERVAL_MS = 5000;
+
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,11 +50,13 @@ export default function TasksPage() {
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [bulkActionRunning, setBulkActionRunning] = useState<"redispatch" | "delete" | null>(null);
   const [bulkActionMessage, setBulkActionMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
+  const latestLoadRequestIdRef = useRef(0);
 
   // 新任务表单
   const [newTask, setNewTask] = useState({
     title: "",
     description: "",
+    acceptanceCriteria: "",
     priority: "medium" as "low" | "medium" | "high" | "urgent",
     assignedTo: "",
     dueDate: "",
@@ -66,10 +72,6 @@ export default function TasksPage() {
     followUpTitle: "",
     followUpDescription: "",
   });
-
-  useEffect(() => {
-    loadTasks();
-  }, [filter]);
 
   useEffect(() => {
     setDependencyDraft(selectedTask?.dependsOnTaskIds || []);
@@ -88,19 +90,63 @@ export default function TasksPage() {
       });
   }, []);
 
-  const loadTasks = async () => {
+  const syncSelectedTask = useCallback((allTasks: Task[]) => {
+    setSelectedTask((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      const latestTask = allTasks.find((task) => task.id === prev.id);
+      if (!latestTask) {
+        return null;
+      }
+
+      const unchanged =
+        latestTask.updatedAt === prev.updatedAt &&
+        latestTask.status === prev.status &&
+        latestTask.result === prev.result &&
+        latestTask.reviewComment === prev.reviewComment &&
+        latestTask.reviewScore === prev.reviewScore &&
+        latestTask.reviewedAt === prev.reviewedAt &&
+        latestTask.blockedReason === prev.blockedReason;
+
+      return unchanged ? prev : latestTask;
+    });
+  }, []);
+
+  const loadTasks = useCallback(async () => {
+    const requestId = ++latestLoadRequestIdRef.current;
+    const cacheBust = Date.now();
+
     try {
-      const url = filter === "all"
-        ? "/api/tasks"
-        : `/api/tasks?status=${filter}`;
+      if (filter === "all") {
+        const allRes = await fetch(`/api/tasks?_=${cacheBust}`, { cache: "no-store" });
+        const allData = await allRes.json();
+
+        if (requestId !== latestLoadRequestIdRef.current) {
+          return;
+        }
+
+        if (allData.success) {
+          const allTasks = allData.tasks as Task[];
+          setTasks(allTasks);
+          setAllTasksForDependency(allTasks);
+          syncSelectedTask(allTasks);
+          setSelectedTaskIds((prev) =>
+            prev.filter((id) => allTasks.some((task) => task.id === id))
+          );
+        }
+        return;
+      }
+
       const [filteredRes, allRes] = await Promise.all([
-        fetch(url),
-        fetch("/api/tasks"),
+        fetch(`/api/tasks?status=${encodeURIComponent(filter)}&_=${cacheBust}`, { cache: "no-store" }),
+        fetch(`/api/tasks?_=${cacheBust}`, { cache: "no-store" }),
       ]);
-      const [filteredData, allData] = await Promise.all([
-        filteredRes.json(),
-        allRes.json(),
-      ]);
+      const [filteredData, allData] = await Promise.all([filteredRes.json(), allRes.json()]);
+
+      if (requestId !== latestLoadRequestIdRef.current) {
+        return;
+      }
 
       if (filteredData.success) {
         const filteredTasks = filteredData.tasks as Task[];
@@ -109,23 +155,62 @@ export default function TasksPage() {
           prev.filter((id) => filteredTasks.some((task) => task.id === id))
         );
       }
+
       if (allData.success) {
-        setAllTasksForDependency(allData.tasks);
+        const allTasks = allData.tasks as Task[];
+        setAllTasksForDependency(allTasks);
+        syncSelectedTask(allTasks);
       }
     } catch (error) {
       console.error("Failed to load tasks:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [filter, syncSelectedTask]);
+
+  useEffect(() => {
+    void loadTasks();
+  }, [loadTasks]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      void loadTasks();
+    }, TASKS_POLL_INTERVAL_MS);
+
+    const handleFocus = () => {
+      void loadTasks();
+    };
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        void loadTasks();
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [loadTasks]);
 
   const createTask = async () => {
     try {
+      if (!newTask.title.trim() || !newTask.description.trim() || !newTask.acceptanceCriteria.trim()) {
+        alert("请填写标题、描述和验收标准");
+        return;
+      }
+
       const res = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...newTask,
+          title: newTask.title.trim(),
+          description: newTask.description.trim(),
+          acceptanceCriteria: newTask.acceptanceCriteria.trim(),
           dependsOnTaskIds: newTask.dependsOnTaskIds,
           dueDate: newTask.dueDate ? new Date(newTask.dueDate).getTime() : undefined,
         }),
@@ -136,6 +221,7 @@ export default function TasksPage() {
         setNewTask({
           title: "",
           description: "",
+          acceptanceCriteria: "",
           priority: "medium",
           assignedTo: "",
           dueDate: "",
@@ -167,11 +253,29 @@ export default function TasksPage() {
   };
 
   const reviewTask = async (taskId: string) => {
+    const trimmedComment = reviewForm.comment.trim();
+    if (!trimmedComment) {
+      alert("请填写审查意见");
+      return;
+    }
+    if (reviewForm.approved && reviewForm.score < 4) {
+      alert("通过审查时评分必须至少为 4 分");
+      return;
+    }
+    if (!reviewForm.approved && reviewForm.score > 3) {
+      alert("驳回任务时评分不能高于 3 分");
+      return;
+    }
+
     try {
       const res = await fetch(`/api/tasks/${taskId}/review`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(reviewForm),
+        body: JSON.stringify({
+          ...reviewForm,
+          comment: trimmedComment,
+          createFollowUpTask: reviewForm.createFollowUp,
+        }),
       });
       const data = await res.json();
       if (data.success) {
@@ -185,9 +289,15 @@ export default function TasksPage() {
           followUpDescription: "",
         });
         loadTasks();
+      } else {
+        const assessmentDetails = data.assessment?.comment
+          ? `\n\n系统校验意见：\n${data.assessment.comment}`
+          : "";
+        alert((data.error || "审查提交失败") + assessmentDetails);
       }
     } catch (error) {
       console.error("Failed to review task:", error);
+      alert("审查提交失败");
     }
   };
 
@@ -457,6 +567,41 @@ export default function TasksPage() {
     return new Map(allTasksForDependency.map((task) => [task.id, task]));
   }, [allTasksForDependency]);
 
+  const selectedTaskAcceptanceCriteria = useMemo(
+    () => (selectedTask ? extractAcceptanceCriteria(selectedTask) : []),
+    [selectedTask]
+  );
+
+  const selectedTaskUnmetAcceptanceCriteria = useMemo(() => {
+    if (!selectedTask || !selectedTask.result) {
+      return [];
+    }
+
+    const normalizedResult = selectedTask.result.toLowerCase().replace(/\s+/g, "");
+    return selectedTaskAcceptanceCriteria.filter((criterion) => {
+      const checklistItem = getChecklistCompletion(
+        selectedTask.resultDetails?.acceptanceChecklist,
+        criterion
+      );
+      if (checklistItem) {
+        return checklistItem.status !== "done" || checklistItem.evidence.trim() === "";
+      }
+      const compactCriterion = criterion.toLowerCase().replace(/\s+/g, "");
+      return compactCriterion !== "" && !normalizedResult.includes(compactCriterion);
+    });
+  }, [selectedTask, selectedTaskAcceptanceCriteria]);
+
+  const selectedTaskDependencyBlockers = useMemo(() => {
+    if (!selectedTask) {
+      return [];
+    }
+
+    return (selectedTask.dependsOnTaskIds || [])
+      .map((depId) => taskMap.get(depId))
+      .filter((task): task is Task => Boolean(task))
+      .filter((task) => task.status !== "approved");
+  }, [selectedTask, taskMap]);
+
   if (loading) {
     return <div className="p-8 text-center">加载中...</div>;
   }
@@ -620,6 +765,16 @@ export default function TasksPage() {
                   onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
                   className="w-full border rounded-lg px-3 py-2 h-32"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">验收标准</label>
+                <textarea
+                  value={newTask.acceptanceCriteria}
+                  onChange={(e) => setNewTask({ ...newTask, acceptanceCriteria: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2 h-28"
+                  placeholder={"每行一条验收标准，例如：\n1. 提供最终文件路径\n2. 包含测试结果\n3. 说明风险与限制"}
+                />
+                <p className="mt-1 text-xs text-gray-500">必填。Boss 审查会按这些条目逐条核对。</p>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -828,10 +983,86 @@ export default function TasksPage() {
                 <p className="text-gray-600 text-sm whitespace-pre-wrap">{selectedTask.description}</p>
               </div>
 
+              <div>
+                <h3 className="font-medium mb-1">验收标准</h3>
+                {selectedTaskAcceptanceCriteria.length > 0 ? (
+                  <div className="space-y-2">
+                    {selectedTaskAcceptanceCriteria.map((criterion, index) => {
+                      const checklistItem = getChecklistCompletion(
+                        selectedTask.resultDetails?.acceptanceChecklist,
+                        criterion
+                      );
+                      return (
+                        <div key={`${criterion}-${index}`} className="rounded border border-gray-200 p-2 text-sm">
+                          <p className="text-gray-800">{index + 1}. {criterion}</p>
+                          {checklistItem && (
+                            <div className="mt-1 text-xs text-gray-600">
+                              <p>提交状态: {getChecklistStatusLabel(checklistItem.status)}</p>
+                              <p className="whitespace-pre-wrap">证据: {checklistItem.evidence}</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-sm text-red-600">当前任务未配置验收标准</p>
+                )}
+              </div>
+
               {selectedTask.result && (
                 <div>
                   <h3 className="font-medium mb-1">执行结果</h3>
                   <p className="text-gray-600 text-sm whitespace-pre-wrap">{selectedTask.result}</p>
+                </div>
+              )}
+
+              {selectedTask.resultDetails && (
+                <div className="rounded border border-gray-200 p-4">
+                  <h3 className="font-medium mb-3">结构化结果</h3>
+                  <div className="space-y-3 text-sm text-gray-700">
+                    <div>
+                      <p className="font-medium text-gray-900">结论摘要</p>
+                      <p className="whitespace-pre-wrap">{selectedTask.resultDetails.summary}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">实现过程</p>
+                      <p className="whitespace-pre-wrap">{selectedTask.resultDetails.implementation}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">验证结果</p>
+                      <p className="whitespace-pre-wrap">{selectedTask.resultDetails.verification}</p>
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">风险与限制</p>
+                      <p className="whitespace-pre-wrap">{selectedTask.resultDetails.risks}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {selectedTaskUnmetAcceptanceCriteria.length > 0 && (
+                <div className="rounded bg-red-50 border border-red-200 p-3 text-sm text-red-800">
+                  <h3 className="font-medium mb-1">未覆盖的验收项</h3>
+                  <div className="space-y-1">
+                    {selectedTaskUnmetAcceptanceCriteria.map((item, index) => (
+                      <p key={`${item}-${index}`}>{index + 1}. {item}</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(selectedTask.blockedReason || selectedTaskDependencyBlockers.length > 0) && (
+                <div className="rounded bg-orange-50 border border-orange-200 p-3 text-sm text-orange-800">
+                  <h3 className="font-medium mb-1">依赖阻塞</h3>
+                  <p>{selectedTask.blockedReason || "存在未通过的前置任务"}</p>
+                  {selectedTaskDependencyBlockers.length > 0 && (
+                    <div className="mt-1 space-y-1">
+                      {selectedTaskDependencyBlockers.map((task) => (
+                        <p key={task.id}>{task.title}（{getStatusLabel(task.status)}）</p>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 

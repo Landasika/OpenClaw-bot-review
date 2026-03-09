@@ -51,11 +51,14 @@ export async function POST(req: Request) {
   try {
     const defaultAgentId = getDefaultAgentId();
     const body: CreateTaskRequest & { autoDispatch?: boolean } = await req.json();
+    const acceptanceCriteria = typeof body.acceptanceCriteria === "string"
+      ? body.acceptanceCriteria.trim()
+      : "";
 
     // 验证必填字段
-    if (!body.title || !body.description) {
+    if (!body.title || !body.description || !acceptanceCriteria) {
       return NextResponse.json(
-        { success: false, error: "Missing required fields: title, description" },
+        { success: false, error: "Missing required fields: title, description, acceptanceCriteria" },
         { status: 400 }
       );
     }
@@ -91,6 +94,7 @@ export async function POST(req: Request) {
       id: taskId,
       title: body.title,
       description: body.description,
+      acceptanceCriteria,
       status,
       priority: body.priority || "medium",
       assignedTo,

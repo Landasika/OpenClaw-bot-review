@@ -21,7 +21,7 @@ export default function Icon() {
           fontSize: 26,
         }}
       >
-        🦞
+        🐮
       </div>
     ),
     {

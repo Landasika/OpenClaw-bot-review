@@ -15,10 +15,10 @@ interface EditActionBarProps {
 const barBtnStyle: React.CSSProperties = {
   padding: '3px 10px',
   fontSize: '12px',
-  background: 'rgba(255, 255, 255, 0.08)',
-  color: 'rgba(255, 255, 255, 0.7)',
-  border: '2px solid #4a4a6a',
-  borderRadius: 0,
+  background: 'rgba(var(--accent2-rgb), 0.1)',
+  color: 'var(--text)',
+  border: '1px solid var(--border)',
+  borderRadius: 8,
   cursor: 'pointer',
 }
 
@@ -34,24 +34,25 @@ export function EditActionBar({ isDirty, canUndo, canRedo, onUndo, onRedo, onSav
   if (!isDirty && !canUndo && !canRedo) return null
 
   return (
-    <div style={{
+    <div className="pixel-office-edit-panel" style={{
       position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 50,
-      background: '#1e1e2e', border: '2px solid #4a4a6a', borderRadius: 0,
+      background: 'linear-gradient(165deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)), var(--card)',
+      border: '1px solid var(--border)', borderRadius: 12,
       padding: '4px 8px', display: 'flex', gap: 4,
-      boxShadow: '2px 2px 0px #0a0a14',
+      boxShadow: 'var(--shadow-soft)',
     }}>
-      <button style={canUndo ? barBtnStyle : disabledBtnStyle} onClick={onUndo} disabled={!canUndo} title="Ctrl+Z">
+      <button className="pixel-office-editor-btn" style={canUndo ? barBtnStyle : disabledBtnStyle} onClick={onUndo} disabled={!canUndo} title="Ctrl+Z">
         {t('pixelOffice.undo')}
       </button>
-      <button style={canRedo ? barBtnStyle : disabledBtnStyle} onClick={onRedo} disabled={!canRedo} title="Ctrl+Y">
+      <button className="pixel-office-editor-btn" style={canRedo ? barBtnStyle : disabledBtnStyle} onClick={onRedo} disabled={!canRedo} title="Ctrl+Y">
         {t('pixelOffice.redo')}
       </button>
       {isDirty && (
         <>
-          <button style={{ ...barBtnStyle, background: 'rgba(90, 140, 255, 0.25)', border: '2px solid #5a8cff' }} onClick={onSave}>
+          <button className="pixel-office-editor-btn" style={{ ...barBtnStyle, background: 'rgba(var(--accent-rgb), 0.24)', border: '1px solid rgba(var(--accent-rgb), 0.55)' }} onClick={onSave}>
             {t('pixelOffice.save')}
           </button>
-          <button style={barBtnStyle} onClick={onReset}>
+          <button className="pixel-office-editor-btn" style={barBtnStyle} onClick={onReset}>
             {t('pixelOffice.reset')}
           </button>
         </>

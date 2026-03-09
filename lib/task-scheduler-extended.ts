@@ -5,6 +5,8 @@
 import { taskStore } from "./task-store";
 import * as FeishuNotifier from "./feishu-notifier";
 import { getDefaultAgentId, getSystemConfig } from "./system-config";
+import { loadTaskMap } from "./task-dependency";
+import { assessTaskReview } from "./task-review";
 
 type ReviewerConfig = {
   enabled: boolean;
@@ -133,6 +135,7 @@ async function reviewPendingTasks(): Promise<void> {
     // 2. 限制并发数量
     const tasksToReview = submittedTasks.slice(0, reviewerConfig.maxConcurrent);
     console.log(`   🎯 本次审查 ${tasksToReview.length} 个任务`);
+    const taskMap = await loadTaskMap();
 
     // 3. 逐个审查任务
     let approvedCount = 0;
@@ -147,17 +150,23 @@ async function reviewPendingTasks(): Promise<void> {
       console.log(`      提交结果: ${task.result?.substring(0, 100)}...`);
 
       try {
-        // Boss 智能审查（这里可以调用 AI 分析）
-        const reviewResult = await bossIntelligentReview(task);
+        const latestTask = taskMap.get(task.id) || task;
+        const reviewResult = assessTaskReview(latestTask, taskMap);
+        console.log(
+          `      📊 系统审查: ${reviewResult.score}/5, 验收覆盖=${reviewResult.acceptanceCriteria.length - reviewResult.unmetAcceptanceCriteria.length}/${reviewResult.acceptanceCriteria.length || 0}, 依赖=${reviewResult.dependencyCheck.satisfied ? "通过" : "未通过"}`
+        );
 
         // 更新任务状态
-        await taskStore.updateTask(task.id, {
+        const updatedTask = await taskStore.updateTask(task.id, {
           status: reviewResult.approved ? "approved" : "rejected",
           reviewedBy: getDefaultAgentId(),
           reviewedAt: Date.now(),
           reviewComment: reviewResult.comment,
           reviewScore: reviewResult.score,
         });
+        if (updatedTask) {
+          taskMap.set(updatedTask.id, updatedTask);
+        }
 
         // 发送通知
         if (reviewResult.approved) {
@@ -211,74 +220,6 @@ async function reviewPendingTasks(): Promise<void> {
   } finally {
     isReviewing = false;
   }
-}
-
-/**
- * Boss 智能审查任务
- * 使用 AI 分析任务结果并给出评分和建议
- */
-async function bossIntelligentReview(task: any): Promise<{
-  approved: boolean;
-  score: number;
-  comment: string;
-}> {
-  // 这里可以集成 AI 来分析任务结果
-  // 暂时使用简单规则
-  
-  const resultLength = task.result?.length || 0;
-  const hasDetail = resultLength > 100;
-  const hasData = /\d+/.test(task.result || "");
-  const hasStructure = (task.result || "").includes('\n');
-
-  // 计算分数（1-5分）
-  let score = 3; // 默认3分
-
-  if (hasDetail && hasData && hasStructure) {
-    score = 5; // 优秀
-  } else if (hasDetail && hasData) {
-    score = 4; // 良好
-  } else if (hasDetail) {
-    score = 3; // 及格
-  } else {
-    score = 2; // 需要改进
-  }
-
-  // 判断是否通过（3分及以上通过）
-  const approved = score >= 3;
-
-  // 生成审查意见
-  let comment = "";
-  
-  if (approved) {
-    if (score === 5) {
-      comment = "完成得非常出色！结果详细、有数据支撑、结构清晰，超出预期。";
-    } else if (score === 4) {
-      comment = "完成得很好，结果详细且有数据支撑，符合预期。";
-    } else {
-      comment = "基本完成任务，结果符合要求。";
-    }
-  } else {
-    comment = "任务完成质量有待提升：";
-    if (!hasDetail) {
-      comment += "结果过于简单，缺少详细信息；";
-    }
-    if (!hasData) {
-      comment += "缺少数据支撑；";
-    }
-    if (!hasStructure) {
-      comment += "结果结构不清晰；";
-    }
-    comment += "请根据上述问题改进任务。";
-  }
-
-  console.log(`      🤖 AI 分析: 长度=${resultLength}, 详细=${hasDetail}, 数据=${hasData}, 结构=${hasStructure}`);
-  console.log(`      📊 评分: ${score}/5 (${approved ? '通过' : '驳回'})`);
-
-  return {
-    approved,
-    score,
-    comment,
-  };
 }
 
 /**

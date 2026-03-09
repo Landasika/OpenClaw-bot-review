@@ -341,6 +341,22 @@ export default function PixelOfficePage() {
   }, [])
 
   useEffect(() => {
+    const main = document.querySelector<HTMLElement>(".app-main")
+    if (!main) return
+    const prevOverflow = main.style.overflow
+    const prevOverscrollBehavior = main.style.overscrollBehavior
+    const prevScrollTop = main.scrollTop
+    main.style.overflow = "hidden"
+    main.style.overscrollBehavior = "none"
+    main.scrollTop = 0
+    return () => {
+      main.style.overflow = prevOverflow
+      main.style.overscrollBehavior = prevOverscrollBehavior
+      main.scrollTop = prevScrollTop
+    }
+  }, [])
+
+  useEffect(() => {
     fetch("/api/system-config")
       .then((res) => res.json())
       .then((cfg) => {
@@ -1387,12 +1403,10 @@ export default function PixelOfficePage() {
   const editor = editorRef.current
   const selectedItem = editor.selectedFurnitureUid
     ? officeRef.current?.layout.furniture.find(f => f.uid === editor.selectedFurnitureUid) : null
-  const modalOverlayClass = isMobileViewport
-    ? "absolute inset-0 z-20 flex items-end justify-center bg-black/50"
-    : "absolute inset-0 z-20 flex items-center justify-center bg-black/40"
+  const modalOverlayClass = "pixel-office-modal-overlay absolute inset-0 z-20 flex items-center justify-center p-3"
   const modalPanelClass = (desktopWidth = "w-80", maxHeight = "max-h-[80%]") =>
     isMobileViewport
-      ? `w-full ${maxHeight} overflow-y-auto rounded-t-2xl border-x border-t border-[var(--border)] bg-[var(--card)] shadow-2xl p-4 pb-6`
+      ? `w-[min(94vw,30rem)] ${maxHeight} overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl p-4`
       : `${desktopWidth} ${maxHeight} overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl p-4`
   const displayAgents = useMemo<AgentActivity[]>(() => {
     const expanded: AgentActivity[] = []
@@ -1428,7 +1442,7 @@ export default function PixelOfficePage() {
       ? `${tempWorkerOwner} agent创建的subagent`
       : `agent id：${agent.agentId}`
     const chipToneClass = isTempWorker
-      ? 'bg-red-900/45 border-red-700/80 text-red-100 animate-pulse'
+      ? `pixel-agent-chip-temp${isMobileViewport ? '' : ' animate-pulse'}`
       : (
         agent.state === 'working' ? `pixel-agent-chip-working${isMobileViewport ? '' : ' animate-pulse'}` :
         agent.state === 'idle' ? `pixel-agent-chip-idle${isMobileViewport ? '' : ' animate-pulse'}` :
@@ -1454,7 +1468,7 @@ export default function PixelOfficePage() {
           ) : (
             <span className={mobileGrid ? 'min-w-0 text-xs truncate' : 'text-sm'}>{agent.name}</span>
           )}
-          {agent.state === 'working' && <span className={`pixel-agent-chip-state uppercase tracking-wider ${mobileGrid ? 'text-[9px] truncate' : 'text-[10px]'} ${isTempWorker ? 'text-red-100' : 'text-green-200'}`}>{t('pixelOffice.state.working')}</span>}
+          {agent.state === 'working' && <span className={`pixel-agent-chip-state uppercase tracking-wider ${mobileGrid ? 'text-[9px] truncate' : 'text-[10px]'} ${isTempWorker ? 'pixel-agent-chip-state-temp' : 'pixel-agent-chip-state-working'}`}>{t('pixelOffice.state.working')}</span>}
           {agent.state === 'idle' && <span className={`pixel-agent-chip-state uppercase tracking-wider ${mobileGrid ? 'text-[9px] truncate' : 'text-[10px]'}`}>{t('pixelOffice.state.idle')}</span>}
           {agent.state === 'offline' && <span className={`pixel-agent-chip-state uppercase tracking-wider ${mobileGrid ? 'text-[9px] truncate' : 'text-[10px]'}`}>{t('pixelOffice.state.offline')}</span>}
           {agent.state === 'waiting' && <span className={`pixel-agent-chip-state uppercase tracking-wider ${mobileGrid ? 'text-[9px] truncate' : 'text-[10px]'}`}>{t('pixelOffice.state.waiting')}</span>}
@@ -1469,9 +1483,9 @@ export default function PixelOfficePage() {
   }
 
   return (
-    <div className="h-[calc(100dvh-3.5rem)] md:h-full overflow-hidden">
+    <div className="pixel-office-page h-[calc(100svh-3.5rem)] md:h-[100svh] overflow-hidden">
       <div className="flex h-full min-h-0 flex-col md:flex-row">
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="relative flex h-0 min-h-0 flex-1 flex-col overflow-hidden md:h-full">
       {/* Floating photo comment DOM bubbles */}
       {floatingCommentsRef.current.map(fc => (
         <div key={fc.key} className="absolute pointer-events-none z-30 whitespace-nowrap"
@@ -1482,8 +1496,7 @@ export default function PixelOfficePage() {
             transform: `translate3d(${fc.x}px, ${fc.y}px, 0) translateX(-50%)`,
             willChange: 'transform, opacity',
           }}>
-          <span className="inline-block px-3 py-1 rounded-full text-sm font-bold"
-            style={{ backgroundColor: 'rgba(0,0,0,0.8)', color: '#FFD700' }}>
+          <span className="pixel-office-floating-comment inline-block px-3 py-1 rounded-full text-sm font-bold">
             {fc.text}
           </span>
         </div>
@@ -1499,15 +1512,14 @@ export default function PixelOfficePage() {
             willChange: 'transform, opacity',
           }}>
           <span
-            className="inline-block px-2 py-0.5 rounded-md text-sm font-mono font-semibold"
-            style={{ backgroundColor: 'rgba(0,0,0,0.72)', color: '#4ade80' }}
+            className="pixel-office-floating-code inline-block px-2 py-0.5 rounded-md text-sm font-mono font-semibold"
           >
             {fc.text}
           </span>
         </div>
       ))}
       {/* Top bar: agent tags + controls */}
-      <div className="flex flex-col gap-2 border-b border-[var(--border)] bg-[rgba(6,18,37,0.62)] p-3 md:p-4 backdrop-blur-sm">
+      <div className="pixel-office-topbar flex flex-col gap-2 border-b border-[var(--border)] p-3 md:p-4 backdrop-blur-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <span className="text-sm font-bold text-[var(--text)]">{t('pixelOffice.title')}</span>
@@ -1518,7 +1530,7 @@ export default function PixelOfficePage() {
           <div className="flex flex-wrap justify-end gap-2">
             <button
               onClick={handleBeautifyOffice}
-              className="px-3 py-1.5 text-xs rounded-lg border border-[var(--accent)]/35 bg-[linear-gradient(120deg,rgba(24,232,255,0.16),rgba(76,160,255,0.12))] text-[var(--text)] hover:border-[var(--accent)]"
+              className="pixel-office-beautify-btn px-3 py-1.5 text-xs rounded-lg border border-[var(--accent)]/35 text-[var(--text)] hover:border-[var(--accent)]"
               title="一键优化办公室布局与装饰"
             >
               ✨ 美化办公室
@@ -1550,32 +1562,37 @@ export default function PixelOfficePage() {
             临时工 {subagentCount}
           </span>
         </div>
-        <div className="md:hidden overflow-x-auto pb-1">
+        <div className="md:hidden pb-1">
+          <div className="h-[8.4rem] overflow-x-auto">
+            {displayAgents.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-[var(--text-muted)] text-sm">{t('common.noData')}</div>
+            ) : (
+              <div className="flex gap-2 min-w-full snap-x snap-mandatory">
+                {mobileAgentPages.map((page, pageIndex) => (
+                  <div key={`mobile-agent-page-${pageIndex}`} className="grid grid-cols-3 grid-rows-3 gap-2 min-w-full h-[8.4rem] shrink-0 snap-start">
+                    {page.map((agent) => renderAgentChip(agent, true))}
+                    {page.length < 9 && Array.from({ length: 9 - page.length }).map((_, i) => (
+                      <div key={`mobile-agent-page-${pageIndex}-placeholder-${i}`} className="rounded-lg border border-transparent" />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="hidden md:block overflow-x-auto pb-1">
           {displayAgents.length === 0 ? (
             <div className="text-[var(--text-muted)] text-sm">{t('common.noData')}</div>
           ) : (
-            <div className="flex gap-2 min-w-full snap-x snap-mandatory">
-              {mobileAgentPages.map((page, pageIndex) => (
-                <div key={`mobile-agent-page-${pageIndex}`} className="grid grid-cols-3 grid-rows-3 gap-2 min-w-full h-[8.4rem] shrink-0 snap-start">
-                  {page.map((agent) => renderAgentChip(agent, true))}
-                  {page.length < 9 && Array.from({ length: 9 - page.length }).map((_, i) => (
-                    <div key={`mobile-agent-page-${pageIndex}-placeholder-${i}`} className="rounded-lg border border-transparent" />
-                  ))}
-                </div>
-              ))}
+            <div className="flex min-w-max gap-2">
+              {displayAgents.map((agent) => renderAgentChip(agent))}
             </div>
-          )}
-        </div>
-        <div className="hidden md:flex gap-2 flex-1 flex-wrap">
-          {displayAgents.map((agent) => renderAgentChip(agent))}
-          {displayAgents.length === 0 && (
-            <div className="text-[var(--text-muted)] text-sm">{t('common.noData')}</div>
           )}
         </div>
       </div>
 
       {/* Canvas */}
-      <div ref={containerRef} className="flex-1 relative overflow-hidden bg-[#1a1a2e]">
+      <div ref={containerRef} className="pixel-office-canvas relative h-0 min-h-0 max-h-full flex-1 overflow-hidden">
         <canvas ref={canvasRef}
           onMouseMove={handleMouseMove}
           onMouseDown={handleMouseDown} onMouseUp={handleMouseUp}
@@ -1587,7 +1604,7 @@ export default function PixelOfficePage() {
           className="w-full h-full"
           style={{ touchAction: 'none' }} />
         {!officeReady && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#1a1a2e]/85 pointer-events-none">
+          <div className="pixel-office-canvas-loading absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
             <div className="px-4 py-2 rounded-lg border border-[var(--border)] bg-[var(--card)] text-sm text-[var(--text-muted)]">
               {t('common.loading')}
             </div>
@@ -1598,7 +1615,7 @@ export default function PixelOfficePage() {
         {broadcasts.length > 0 && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex flex-col gap-2 pointer-events-none">
             {broadcasts.map(b => (
-              <div key={b.id} className="px-4 py-2 rounded-full bg-black/70 text-white text-sm font-medium backdrop-blur-sm shadow-lg whitespace-nowrap"
+              <div key={b.id} className="pixel-office-broadcast-pill px-4 py-2 rounded-full text-sm font-medium backdrop-blur-sm shadow-lg whitespace-nowrap"
                 style={{ animation: 'broadcastIn 0.3s ease-out, broadcastOut 0.5s ease-in 4.5s forwards' }}>
                 {b.text}
               </div>
@@ -1646,9 +1663,9 @@ export default function PixelOfficePage() {
           const stats = agentStatsRef.current.get(selectedAgentId)
           if (!agent) return null
           const responseColor = stats?.todayAvgResponseMs
-            ? stats.todayAvgResponseMs > 50000 ? 'text-red-400'
-            : stats.todayAvgResponseMs > 30000 ? 'text-yellow-400'
-            : 'text-green-400' : 'text-[var(--text-muted)]'
+            ? stats.todayAvgResponseMs > 50000 ? 'text-[var(--danger)]'
+            : stats.todayAvgResponseMs > 30000 ? 'text-[var(--orange)]'
+            : 'text-[var(--green)]' : 'text-[var(--text-muted)]'
           return (
             <div className={modalOverlayClass} onClick={() => setSelectedAgentId(null)}>
               <div className={modalPanelClass("w-72", "max-h-[78%]")} onClick={e => e.stopPropagation()}>
@@ -1658,8 +1675,8 @@ export default function PixelOfficePage() {
                     <div>
                       <div className="font-semibold text-[var(--text)]">{agent.name}</div>
                       <span className={`text-[10px] uppercase tracking-wider ${
-                        agent.state === 'working' ? 'text-green-400' :
-                        agent.state === 'idle' ? 'text-yellow-400' : 'text-slate-400'
+                        agent.state === 'working' ? 'text-[var(--green)]' :
+                        agent.state === 'idle' ? 'text-[var(--orange)]' : 'text-[var(--text-muted)]'
                       }`}>{t(`pixelOffice.state.${agent.state}`)}</span>
                     </div>
                   </div>
@@ -1668,7 +1685,7 @@ export default function PixelOfficePage() {
                 <div className="space-y-1.5 text-xs">
                   <div className="flex justify-between"><span className="text-[var(--text-muted)]">{t('agent.sessionCount')}</span><span className="text-[var(--text)]">{stats?.sessionCount ?? '--'}</span></div>
                   <div className="flex justify-between"><span className="text-[var(--text-muted)]">{t('agent.messageCount')}</span><span className="text-[var(--text)]">{stats?.messageCount ?? '--'}</span></div>
-                  <div className="flex justify-between items-center"><span className="text-[var(--text-muted)]">{t('agent.tokenUsage')}</span><div className="flex items-center gap-2">{stats?.weeklyTokens && <MiniSparkline data={stats.weeklyTokens} color="#4ade80" />}<span className="text-[var(--text)]">{stats ? formatTokens(stats.totalTokens) : '--'}</span></div></div>
+                  <div className="flex justify-between items-center"><span className="text-[var(--text-muted)]">{t('agent.tokenUsage')}</span><div className="flex items-center gap-2">{stats?.weeklyTokens && <MiniSparkline data={stats.weeklyTokens} color="var(--green)" />}<span className="text-[var(--text)]">{stats ? formatTokens(stats.totalTokens) : '--'}</span></div></div>
                   <div className="flex justify-between items-center"><span className="text-[var(--text-muted)]">{t('agent.todayAvgResponse')}</span><div className="flex items-center gap-2">{stats?.weeklyResponseMs && <MiniSparkline data={stats.weeklyResponseMs} />}<span className={responseColor}>{stats?.todayAvgResponseMs ? formatMs(stats.todayAvgResponseMs) : '--'}</span></div></div>
                   {stats?.lastActive && <div className="flex justify-between"><span className="text-[var(--text-muted)]">{t('agent.lastActive')}</span><span className="text-[var(--text)]">{new Date(stats.lastActive).toLocaleString('zh-CN')}</span></div>}
                 </div>

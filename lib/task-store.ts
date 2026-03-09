@@ -18,6 +18,8 @@ const LEGACY_TASKS_INDEX_FILES = [
 ];
 
 export class TaskStore {
+  private writeQueue: Promise<void> = Promise.resolve();
+
   private ensureDirs() {
     if (!fs.existsSync(TASKS_DIR)) {
       fs.mkdirSync(TASKS_DIR, { recursive: true });
@@ -73,13 +75,16 @@ export class TaskStore {
         }
       }
 
-      if (changed) {
-        this.saveIndex(index);
-      }
       return index;
     } catch {
       return {};
     }
+  }
+
+  private async withWriteLock<T>(work: () => T | Promise<T>): Promise<T> {
+    const run = this.writeQueue.then(() => work());
+    this.writeQueue = run.then(() => undefined, () => undefined);
+    return run;
   }
 
   private saveIndex(index: Record<string, Task>) {
@@ -117,10 +122,13 @@ export class TaskStore {
   }
 
   async createTask(task: Task): Promise<Task> {
-    const index = this.getIndex();
-    const normalizedTask = this.normalizeTaskAgentIds(task).task;
-    index[normalizedTask.id] = normalizedTask;
-    this.saveIndex(index);
+    const normalizedTask = await this.withWriteLock(() => {
+      const index = this.getIndex();
+      const nextTask = this.normalizeTaskAgentIds(task).task;
+      index[nextTask.id] = nextTask;
+      this.saveIndex(index);
+      return nextTask;
+    });
 
     // 如果任务被分配，通知员工
     if (normalizedTask.assignedTo && normalizedTask.status === "assigned") {
@@ -141,26 +149,69 @@ export class TaskStore {
   }
 
   async updateTask(taskId: string, updates: Partial<Task>): Promise<Task | null> {
-    const index = this.getIndex();
-    const task = index[taskId];
-    if (!task) return null;
+    return this.withWriteLock(() => {
+      const index = this.getIndex();
+      const task = index[taskId];
+      if (!task) return null;
 
-    const normalizedUpdates: Partial<Task> = { ...updates };
-    if (Object.prototype.hasOwnProperty.call(normalizedUpdates, "assignedTo")) {
-      normalizedUpdates.assignedTo = normalizeAgentId(normalizedUpdates.assignedTo as string | undefined);
-    }
-    if (typeof normalizedUpdates.createdBy === "string") {
-      normalizedUpdates.createdBy = normalizeAgentId(normalizedUpdates.createdBy) || normalizedUpdates.createdBy;
-    }
+      const normalizedUpdates: Partial<Task> = { ...updates };
+      if (Object.prototype.hasOwnProperty.call(normalizedUpdates, "assignedTo")) {
+        normalizedUpdates.assignedTo = normalizeAgentId(normalizedUpdates.assignedTo as string | undefined);
+      }
+      if (typeof normalizedUpdates.createdBy === "string") {
+        normalizedUpdates.createdBy = normalizeAgentId(normalizedUpdates.createdBy) || normalizedUpdates.createdBy;
+      }
 
-    const updated = {
-      ...task,
-      ...normalizedUpdates,
-      updatedAt: Date.now(),
-    };
-    index[taskId] = this.normalizeTaskAgentIds(updated).task;
-    this.saveIndex(index);
-    return index[taskId];
+      const updated = {
+        ...task,
+        ...normalizedUpdates,
+        updatedAt: Date.now(),
+      };
+      index[taskId] = this.normalizeTaskAgentIds(updated).task;
+      this.saveIndex(index);
+      return index[taskId];
+    });
+  }
+
+  async updateTaskIf(
+    taskId: string,
+    predicate: (task: Task) => boolean,
+    updates: Partial<Task> | ((task: Task) => Partial<Task>)
+  ): Promise<{ applied: boolean; task: Task | null; current: Task | null }> {
+    return this.withWriteLock(() => {
+      const index = this.getIndex();
+      const current = index[taskId] || null;
+      if (!current) {
+        return { applied: false, task: null, current: null };
+      }
+
+      if (!predicate(current)) {
+        return { applied: false, task: current, current };
+      }
+
+      const rawUpdates = typeof updates === "function" ? updates(current) : updates;
+      const normalizedUpdates: Partial<Task> = { ...rawUpdates };
+      if (Object.prototype.hasOwnProperty.call(normalizedUpdates, "assignedTo")) {
+        normalizedUpdates.assignedTo = normalizeAgentId(normalizedUpdates.assignedTo as string | undefined);
+      }
+      if (typeof normalizedUpdates.createdBy === "string") {
+        normalizedUpdates.createdBy = normalizeAgentId(normalizedUpdates.createdBy) || normalizedUpdates.createdBy;
+      }
+
+      const next = {
+        ...current,
+        ...normalizedUpdates,
+        updatedAt: Date.now(),
+      };
+      index[taskId] = this.normalizeTaskAgentIds(next).task;
+      this.saveIndex(index);
+
+      return {
+        applied: true,
+        task: index[taskId],
+        current: index[taskId],
+      };
+    });
   }
 
   async listTasks(filter?: {
@@ -195,12 +246,14 @@ export class TaskStore {
   }
 
   async deleteTask(taskId: string): Promise<boolean> {
-    const index = this.getIndex();
-    if (!index[taskId]) return false;
+    return this.withWriteLock(() => {
+      const index = this.getIndex();
+      if (!index[taskId]) return false;
 
-    delete index[taskId];
-    this.saveIndex(index);
-    return true;
+      delete index[taskId];
+      this.saveIndex(index);
+      return true;
+    });
   }
 
   async getTasksByAgent(agentId: string): Promise<{

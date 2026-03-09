@@ -4,6 +4,7 @@ import { Providers } from "./providers";
 import { Sidebar } from "./sidebar";
 import { AlertMonitor } from "./alert-monitor";
 import { GlobalBugsOverlay } from "./global-bugs-overlay";
+import { SessionFullAlert } from "./components/session-full-alert";
 import { initTaskAutomation } from "./task-scheduler-init";
 
 // 在服务端启动任务调度器
@@ -23,7 +24,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" data-theme-mode="sunny-girl">
       <body className="app-body">
         <div className="app-chrome-bg" aria-hidden="true">
           <span className="app-orb app-orb-a" />
@@ -38,6 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Providers>
           <AlertMonitor />
           <GlobalBugsOverlay />
+          <SessionFullAlert />
           <div className="app-frame min-h-screen md:flex">
             <Sidebar />
             <main className="app-main flex-1 overflow-auto pt-14 md:pt-0">{children}</main>

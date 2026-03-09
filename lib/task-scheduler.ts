@@ -11,6 +11,8 @@ import * as FeishuNotifier from "./feishu-notifier";
 import { getSystemConfig } from "./system-config";
 import { buildTaskMap, evaluateTaskDependencies } from "./task-dependency";
 import { normalizeAgentId } from "./agent-id";
+import { extractAcceptanceCriteria } from "./task-acceptance";
+import { normalizeAutomatedTaskResult } from "./task-result";
 
 const execFileAsync = promisify(execFile);
 const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(process.env.HOME || "", ".openclaw");
@@ -37,6 +39,45 @@ export interface TaskDispatchResult {
   error?: string;
   duration?: number;
   timestamp: number;
+}
+
+function buildTaskExecutionMessage(
+  task: {
+    title: string;
+    description: string;
+    acceptanceCriteria?: string;
+  },
+  taskDescription: string
+): string {
+  const acceptanceCriteria = extractAcceptanceCriteria(task);
+  const checklistTemplate = acceptanceCriteria.map((criterion) => ({
+    criterion,
+    status: "done",
+    evidence: "填写对应证据，例如文件路径、命令输出、截图描述",
+  }));
+
+  return [
+    "【任务执行】",
+    "",
+    taskDescription,
+    "",
+    "请执行此任务，并严格输出 JSON，禁止 Markdown 包裹，字段必须完整：",
+    JSON.stringify(
+      {
+        summary: "2-4 句总结最终交付结果",
+        implementation: "说明关键实现步骤、修改点、产物路径或命令",
+        verification: "说明验证步骤、执行输出、测试结果或检查方法",
+        risks: "说明风险、限制、遗留问题；没有则写“无”并解释边界",
+        acceptanceChecklist: checklistTemplate,
+      },
+      null,
+      2
+    ),
+    "",
+    acceptanceCriteria.length > 0
+      ? `必须逐条回应这些验收标准：\n${acceptanceCriteria.map((item, index) => `${index + 1}. ${item}`).join("\n")}`
+      : "必须明确给出可验证的验收回执。",
+  ].join("\n");
 }
 
 function includesContextWindowExceeded(input: string): boolean {
@@ -234,12 +275,45 @@ export async function dispatchTaskToAgent(
     if (!task) {
       throw new Error(`Task ${taskId} not found`);
     }
+    if (task.status === "blocked") {
+      return {
+        success: false,
+        taskId,
+        agentId,
+        error: task.blockedReason || `Task ${taskId} is blocked by dependencies`,
+        timestamp: Date.now(),
+      };
+    }
+    if (task.status !== "assigned") {
+      return {
+        success: false,
+        taskId,
+        agentId,
+        error: `Task ${taskId} status is ${task.status}, cannot dispatch`,
+        timestamp: Date.now(),
+      };
+    }
+    if (task.assignedTo !== agentId) {
+      return {
+        success: false,
+        taskId,
+        agentId,
+        error: `Task ${taskId} is assigned to ${task.assignedTo || "unknown"}, not ${agentId}`,
+        timestamp: Date.now(),
+      };
+    }
     const cancelTask = async (reason: string) => {
-      await taskStore.updateTask(taskId, {
-        status: "cancelled",
-        result: `执行失败: ${reason}`,
-        completedAt: Date.now(),
-      });
+      await taskStore.updateTaskIf(
+        taskId,
+        (current) =>
+          current.assignedTo === agentId
+          && (current.status === "assigned" || current.status === "in_progress"),
+        {
+          status: "cancelled",
+          result: `执行失败: ${reason}`,
+          completedAt: Date.now(),
+        }
+      );
     };
 
     console.log(`📝 [任务信息]`);
@@ -376,22 +450,36 @@ export async function dispatchTaskToAgent(
       console.log('');
     }
 
-    // 4. 更新任务状态为"进行中"
-    console.log(`📊 [状态更新] 任务状态: assigned → in_progress`);
-    await taskStore.updateTask(taskId, {
-      status: "in_progress",
-      startedAt: Date.now(),
-    });
+    // 4. 原子抢占任务，避免重复派发
+    console.log(`📊 [状态更新] 尝试抢占任务: assigned → in_progress`);
+    const claimResult = await taskStore.updateTaskIf(
+      taskId,
+      (current) => current.status === "assigned" && current.assignedTo === agentId,
+      (current) => ({
+        status: "in_progress",
+        startedAt: current.startedAt || Date.now(),
+        blockedReason: undefined,
+      })
+    );
+    if (!claimResult.applied || !claimResult.task) {
+      return {
+        success: false,
+        taskId,
+        agentId,
+        error: `Task ${taskId} was already claimed or changed (status=${claimResult.current?.status || "missing"})`,
+        timestamp: Date.now(),
+      };
+    }
 
     // 5. 通知任务开始执行
     await FeishuNotifier.notifyTaskAccepted(
       taskId,
-      task.title,
+      claimResult.task.title,
       agentId
     ).catch(err => console.error("[Feishu] 通知失败:", err));
 
     // 6. 构建调度消息
-    const message = `【任务执行】\n\n${taskDescription}\n\n请执行此任务并返回结果。`;
+    const message = buildTaskExecutionMessage(task, taskDescription);
 
     console.log(`🤖 [执行命令] openclaw agent --agent ${agentId}`);
     console.log('');
@@ -425,22 +513,35 @@ export async function dispatchTaskToAgent(
 
     // 8. 解析后的最终响应文本
     const responseText = commandResult.responseText;
+    const normalizedSubmission = normalizeAutomatedTaskResult(
+      task,
+      responseText,
+      commandResult.parsedOutput
+    );
 
     const duration = Date.now() - startTime;
 
     // 9. 更新任务状态为"已提交"
-    await taskStore.updateTask(taskId, {
-      status: "submitted",
-      result: responseText,
-      completedAt: Date.now(),
-    });
+    const submitResult = await taskStore.updateTaskIf(
+      taskId,
+      (current) => current.status === "in_progress" && current.assignedTo === agentId,
+      {
+        status: "submitted",
+        result: normalizedSubmission.result,
+        resultDetails: normalizedSubmission.resultDetails,
+        completedAt: Date.now(),
+      }
+    );
+    if (!submitResult.applied || !submitResult.task) {
+      throw new Error(`任务执行完成后写回失败，当前状态已变为 ${submitResult.current?.status || "missing"}`);
+    }
 
     // 10. 通知任务完成
     FeishuNotifier.notifyTaskCompleted(
       taskId,
-      (await taskStore.getTask(taskId))?.title || taskId,
+      submitResult.task.title || taskId,
       agentId,
-      responseText,
+      normalizedSubmission.result,
       duration
     ).catch(err => console.error("[Feishu] 通知失败:", err));
 
@@ -455,7 +556,7 @@ export async function dispatchTaskToAgent(
       success: true,
       taskId,
       agentId,
-      response: responseText,
+      response: normalizedSubmission.result,
       duration,
       timestamp: Date.now(),
     };
@@ -473,14 +574,18 @@ export async function dispatchTaskToAgent(
     console.log('');
 
     // 更新任务状态，记录错误
-    const existingTask = await taskStore.getTask(taskId);
-    if (existingTask) {
-      await taskStore.updateTask(taskId, {
+    const cancelResult = await taskStore.updateTaskIf(
+      taskId,
+      (current) =>
+        current.assignedTo === agentId
+        && (current.status === "assigned" || current.status === "in_progress"),
+      {
         status: "cancelled",
         result: `执行失败: ${errorMessage}`,
         completedAt: Date.now(),
-      });
-    }
+      }
+    );
+    const existingTask = cancelResult.task || cancelResult.current;
 
     // 通知任务失败
     FeishuNotifier.notifyTaskDispatchFailed(

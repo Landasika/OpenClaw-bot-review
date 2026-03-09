@@ -2,43 +2,72 @@
 
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
 
-export type Theme = "dark" | "light";
+export type ThemeMode = "sunny-girl" | "sci-fi" | "cosmic";
+
+const THEME_MODE_STORAGE_KEY = "theme-mode";
+const LEGACY_THEME_STORAGE_KEY = "theme";
+const DEFAULT_THEME_MODE: ThemeMode = "sunny-girl";
+const THEME_MODE_ORDER: ThemeMode[] = ["sunny-girl", "sci-fi", "cosmic"];
 
 interface ThemeContextType {
-  theme: Theme;
-  setTheme: (t: Theme) => void;
-  toggleTheme: () => void;
+  themeMode: ThemeMode;
+  setThemeMode: (mode: ThemeMode) => void;
+  cycleThemeMode: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextType>({
-  theme: "dark",
-  setTheme: () => {},
-  toggleTheme: () => {},
+  themeMode: DEFAULT_THEME_MODE,
+  setThemeMode: () => {},
+  cycleThemeMode: () => {},
 });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("dark");
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(DEFAULT_THEME_MODE);
+
+  const applyThemeMode = useCallback((mode: ThemeMode) => {
+    document.documentElement.setAttribute("data-theme-mode", mode);
+  }, []);
+
+  const setThemeMode = useCallback(
+    (mode: ThemeMode) => {
+      setThemeModeState(mode);
+      applyThemeMode(mode);
+      localStorage.setItem(THEME_MODE_STORAGE_KEY, mode);
+    },
+    [applyThemeMode]
+  );
+
+  const cycleThemeMode = useCallback(() => {
+    const currentIndex = THEME_MODE_ORDER.indexOf(themeMode);
+    const nextIndex = (currentIndex + 1) % THEME_MODE_ORDER.length;
+    setThemeMode(THEME_MODE_ORDER[nextIndex]);
+  }, [themeMode, setThemeMode]);
 
   useEffect(() => {
-    const saved = localStorage.getItem("theme") as Theme;
-    if (saved === "light" || saved === "dark") {
-      setThemeState(saved);
-      document.documentElement.setAttribute("data-theme", saved);
+    const saved = localStorage.getItem(THEME_MODE_STORAGE_KEY);
+    if (saved === "sunny-girl" || saved === "sci-fi" || saved === "cosmic") {
+      setThemeModeState(saved);
+      applyThemeMode(saved);
+      return;
     }
-  }, []);
-
-  const setTheme = useCallback((t: Theme) => {
-    setThemeState(t);
-    document.documentElement.setAttribute("data-theme", t);
-    localStorage.setItem("theme", t);
-  }, []);
-
-  const toggleTheme = useCallback(() => {
-    setTheme(theme === "dark" ? "light" : "dark");
-  }, [theme, setTheme]);
+    const legacyTheme = localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
+    let migratedMode: ThemeMode = DEFAULT_THEME_MODE;
+    if (legacyTheme === "dark") {
+      migratedMode = "sci-fi";
+    }
+    if (legacyTheme === "light") {
+      migratedMode = "sunny-girl";
+    }
+    setThemeModeState(migratedMode);
+    applyThemeMode(migratedMode);
+    localStorage.setItem(THEME_MODE_STORAGE_KEY, migratedMode);
+    if (legacyTheme === "dark" || legacyTheme === "light") {
+      localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
+    }
+  }, [applyThemeMode]);
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>
+    <ThemeContext.Provider value={{ themeMode, setThemeMode, cycleThemeMode }}>
       {children}
     </ThemeContext.Provider>
   );
@@ -49,14 +78,25 @@ export function useTheme() {
 }
 
 export function ThemeSwitcher() {
-  const { theme, toggleTheme } = useTheme();
+  const { themeMode, setThemeMode } = useTheme();
+  const options: Array<{ mode: ThemeMode; label: string; titleLabel: string; icon: string }> = [
+    { mode: "sunny-girl", label: "晴天", titleLabel: "晴天少女", icon: "🌤️" },
+    { mode: "sci-fi", label: "科幻", titleLabel: "科幻", icon: "🛸" },
+    { mode: "cosmic", label: "宇宙", titleLabel: "宇宙", icon: "🌌" },
+  ];
+
   return (
-    <button
-      onClick={toggleTheme}
-      className="px-2 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm hover:border-[var(--accent)] transition cursor-pointer"
-      title={theme === "dark" ? "切换到亮色模式" : "切换到暗色模式"}
+    <select
+      value={themeMode}
+      onChange={(e) => setThemeMode(e.target.value as ThemeMode)}
+      className="theme-switcher min-w-[96px] px-3 py-1.5 rounded-lg bg-[var(--card)] border border-[var(--border)] text-xs font-medium hover:border-[var(--accent)] transition cursor-pointer text-[var(--text)]"
+      aria-label="主题风格切换"
     >
-      {theme === "dark" ? "☀️" : "🌙"}
-    </button>
+      {options.map((option) => (
+        <option key={option.mode} value={option.mode}>
+          {`${option.icon} ${option.label}`}
+        </option>
+      ))}
+    </select>
   );
 }

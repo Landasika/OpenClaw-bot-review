@@ -432,3 +432,57 @@ export async function notifyAgentReady(
 
   await sendFeishuMessage(bot, targetChatId, message);
 }
+
+/**
+ * 大项任务进度汇报
+ */
+export async function notifyEpicProgress(
+  epicTitle: string,
+  reportMarkdown: string,
+  chatId?: string
+): Promise<void> {
+  const bot = resolveBotType(getDefaultAgentId());
+  const targetChatId = resolveDefaultChatId(chatId);
+  const truncated = reportMarkdown.length > 2800
+    ? `${reportMarkdown.slice(0, 2800)}\n\n...（已截断）`
+    : reportMarkdown;
+
+  const message = `【📈 大项任务进度汇报】
+
+大项: ${epicTitle}
+时间: ${new Date().toLocaleString("zh-CN")}
+
+${truncated}`;
+
+  await sendFeishuMessage(bot, targetChatId, message);
+}
+
+/**
+ * 会话满告警
+ */
+export async function notifySessionFull(
+  agentId: string,
+  sessionKey: string,
+  sessionType: string,
+  usagePercent: number,
+  chatId?: string
+): Promise<void> {
+  const bot = resolveBotType(getDefaultAgentId());
+  const employeeName = resolveEmployeeName(agentId);
+  const targetChatId = resolveDefaultChatId(chatId);
+
+  const message = `【🚨 会话满告警】
+
+机器人: ${employeeName} (${agentId})
+会话类型: ${sessionType}
+会话ID: ${sessionKey}
+上下文使用率: ${usagePercent.toFixed(1)}%
+
+⚠️ 上下文窗口已使用超过90%，建议删除会话！
+
+时间: ${new Date().toLocaleString("zh-CN")}
+
+请前往会话列表页面删除该会话。`;
+
+  await sendFeishuMessage(bot, targetChatId, message);
+}

@@ -11,35 +11,35 @@ import { getColorizedFloorSprite, getFloorPatternCount, hasFloorSprites } from '
 const btnStyle: React.CSSProperties = {
   padding: '3px 8px',
   fontSize: '12px',
-  background: 'rgba(255, 255, 255, 0.08)',
-  color: 'rgba(255, 255, 255, 0.7)',
-  border: '2px solid transparent',
-  borderRadius: 0,
+  background: 'rgba(var(--accent2-rgb), 0.1)',
+  color: 'var(--text)',
+  border: '1px solid var(--border)',
+  borderRadius: 8,
   cursor: 'pointer',
 }
 
 const activeBtnStyle: React.CSSProperties = {
   ...btnStyle,
-  background: 'rgba(90, 140, 255, 0.25)',
-  color: 'rgba(255, 255, 255, 0.9)',
-  border: '2px solid #5a8cff',
+  background: 'rgba(var(--accent-rgb), 0.2)',
+  color: 'var(--text)',
+  border: '1px solid rgba(var(--accent-rgb), 0.55)',
 }
 
 const tabStyle: React.CSSProperties = {
   padding: '2px 6px',
   fontSize: '11px',
   background: 'transparent',
-  color: 'rgba(255, 255, 255, 0.5)',
-  border: '2px solid transparent',
-  borderRadius: 0,
+  color: 'var(--text-muted)',
+  border: '1px solid transparent',
+  borderRadius: 8,
   cursor: 'pointer',
 }
 
 const activeTabStyle: React.CSSProperties = {
   ...tabStyle,
-  background: 'rgba(255, 255, 255, 0.08)',
-  color: 'rgba(255, 255, 255, 0.8)',
-  border: '2px solid #5a8cff',
+  background: 'rgba(var(--accent-rgb), 0.14)',
+  color: 'var(--text)',
+  border: '1px solid rgba(var(--accent-rgb), 0.45)',
 }
 
 function FloorPatternPreview({ patternIndex, color, selected, onClick }: {
@@ -71,10 +71,10 @@ function FloorPatternPreview({ patternIndex, color, selected, onClick }: {
   }, [patternIndex, color])
 
   return (
-    <button onClick={onClick} title={`Floor ${patternIndex}`} style={{
+    <button className="pixel-office-editor-btn" onClick={onClick} title={`Floor ${patternIndex}`} style={{
       width: displaySize, height: displaySize, padding: 0,
-      border: selected ? '2px solid #5a8cff' : '2px solid #4a4a6a',
-      borderRadius: 0, cursor: 'pointer', overflow: 'hidden', flexShrink: 0, background: '#2A2A3A',
+      border: selected ? '1px solid rgba(var(--accent-rgb), 0.7)' : '1px solid var(--border)',
+      borderRadius: 8, cursor: 'pointer', overflow: 'hidden', flexShrink: 0, background: 'var(--card-soft)',
     }}>
       <canvas ref={canvasRef} style={{ width: displaySize, height: displaySize, display: 'block' }} />
     </button>
@@ -86,11 +86,11 @@ function ColorSlider({ label, value, min, max, onChange }: {
 }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-      <span style={{ fontSize: '11px', color: '#999', width: 16, textAlign: 'right', flexShrink: 0 }}>{label}</span>
+      <span style={{ fontSize: '11px', color: 'var(--text-muted)', width: 16, textAlign: 'right', flexShrink: 0 }}>{label}</span>
       <input type="range" min={min} max={max} value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        style={{ flex: 1, height: 12, accentColor: 'rgba(90, 140, 255, 0.8)' }} />
-      <span style={{ fontSize: '11px', color: '#999', width: 32, textAlign: 'right', flexShrink: 0 }}>{value}</span>
+        style={{ flex: 1, height: 12, accentColor: 'var(--accent)' }} />
+      <span style={{ fontSize: '11px', color: 'var(--text-muted)', width: 32, textAlign: 'right', flexShrink: 0 }}>{value}</span>
     </div>
   )
 }
@@ -149,29 +149,30 @@ export function EditorToolbar({
   const isFurnitureActive = activeTool === EditTool.FURNITURE_PLACE || activeTool === EditTool.FURNITURE_PICK
 
   return (
-    <div style={{
+    <div className="pixel-office-edit-panel" style={{
       position: 'absolute', bottom: 12, left: 10, zIndex: 50,
-      background: '#1e1e2e', border: '2px solid #4a4a6a', borderRadius: 0,
+      background: 'linear-gradient(165deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)), var(--card)',
+      border: '1px solid var(--border)', borderRadius: 12,
       padding: '6px 8px', display: 'flex', flexDirection: 'column-reverse', gap: 6,
-      boxShadow: '2px 2px 0px #0a0a14', maxWidth: 'calc(100vw - 20px)',
+      boxShadow: 'var(--shadow-soft)', maxWidth: 'calc(100vw - 20px)',
     }}>
       {/* Tool row */}
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-        <button style={isFloorActive ? activeBtnStyle : btnStyle} onClick={() => onToolChange(EditTool.TILE_PAINT)} title="Paint floor tiles">Floor</button>
-        <button style={isWallActive ? activeBtnStyle : btnStyle} onClick={() => onToolChange(EditTool.WALL_PAINT)} title="Paint walls">Wall</button>
-        <button style={isEraseActive ? activeBtnStyle : btnStyle} onClick={() => onToolChange(EditTool.ERASE)} title="Erase tiles">Erase</button>
-        <button style={isFurnitureActive ? activeBtnStyle : btnStyle} onClick={() => onToolChange(EditTool.FURNITURE_PLACE)} title="Place furniture">Furniture</button>
+        <button className="pixel-office-editor-btn" style={isFloorActive ? activeBtnStyle : btnStyle} onClick={() => onToolChange(EditTool.TILE_PAINT)} title="Paint floor tiles">Floor</button>
+        <button className="pixel-office-editor-btn" style={isWallActive ? activeBtnStyle : btnStyle} onClick={() => onToolChange(EditTool.WALL_PAINT)} title="Paint walls">Wall</button>
+        <button className="pixel-office-editor-btn" style={isEraseActive ? activeBtnStyle : btnStyle} onClick={() => onToolChange(EditTool.ERASE)} title="Erase tiles">Erase</button>
+        <button className="pixel-office-editor-btn" style={isFurnitureActive ? activeBtnStyle : btnStyle} onClick={() => onToolChange(EditTool.FURNITURE_PLACE)} title="Place furniture">Furniture</button>
       </div>
 
       {/* Floor sub-panel */}
       {isFloorActive && (
         <div style={{ display: 'flex', flexDirection: 'column-reverse', gap: 6 }}>
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <button style={showColor ? activeBtnStyle : btnStyle} onClick={() => setShowColor(v => !v)} title="Adjust floor color">Color</button>
-            <button style={activeTool === EditTool.EYEDROPPER ? activeBtnStyle : btnStyle} onClick={() => onToolChange(EditTool.EYEDROPPER)} title="Pick floor pattern + color">Pick</button>
+            <button className="pixel-office-editor-btn" style={showColor ? activeBtnStyle : btnStyle} onClick={() => setShowColor(v => !v)} title="Adjust floor color">Color</button>
+            <button className="pixel-office-editor-btn" style={activeTool === EditTool.EYEDROPPER ? activeBtnStyle : btnStyle} onClick={() => onToolChange(EditTool.EYEDROPPER)} title="Pick floor pattern + color">Pick</button>
           </div>
           {showColor && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '4px 6px', background: '#181828', border: '2px solid #4a4a6a', borderRadius: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '4px 6px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10 }}>
               <ColorSlider label="H" value={floorColor.h} min={0} max={360} onChange={v => handleColorChange('h', v)} />
               <ColorSlider label="S" value={floorColor.s} min={0} max={100} onChange={v => handleColorChange('s', v)} />
               <ColorSlider label="B" value={floorColor.b} min={-100} max={100} onChange={v => handleColorChange('b', v)} />
@@ -191,10 +192,10 @@ export function EditorToolbar({
       {isWallActive && (
         <div style={{ display: 'flex', flexDirection: 'column-reverse', gap: 6 }}>
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <button style={showWallColor ? activeBtnStyle : btnStyle} onClick={() => setShowWallColor(v => !v)} title="Adjust wall color">Color</button>
+            <button className="pixel-office-editor-btn" style={showWallColor ? activeBtnStyle : btnStyle} onClick={() => setShowWallColor(v => !v)} title="Adjust wall color">Color</button>
           </div>
           {showWallColor && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '4px 6px', background: '#181828', border: '2px solid #4a4a6a', borderRadius: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '4px 6px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10 }}>
               <ColorSlider label="H" value={wallColor.h} min={0} max={360} onChange={v => handleWallColorChange('h', v)} />
               <ColorSlider label="S" value={wallColor.s} min={0} max={100} onChange={v => handleWallColorChange('s', v)} />
               <ColorSlider label="B" value={wallColor.b} min={-100} max={100} onChange={v => handleWallColorChange('b', v)} />
@@ -209,20 +210,20 @@ export function EditorToolbar({
         <div style={{ display: 'flex', flexDirection: 'column-reverse', gap: 4 }}>
           <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
             {getActiveCategories().map(cat => (
-              <button key={cat.id} style={activeCategory === cat.id ? activeTabStyle : tabStyle} onClick={() => setActiveCategory(cat.id)}>{cat.label}</button>
+              <button className="pixel-office-editor-btn" key={cat.id} style={activeCategory === cat.id ? activeTabStyle : tabStyle} onClick={() => setActiveCategory(cat.id)}>{cat.label}</button>
             ))}
-            <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.15)', margin: '0 2px', flexShrink: 0 }} />
-            <button style={activeTool === EditTool.FURNITURE_PICK ? activeBtnStyle : btnStyle} onClick={() => onToolChange(EditTool.FURNITURE_PICK)} title="Pick furniture type">Pick</button>
+            <div style={{ width: 1, height: 14, background: 'var(--border)', margin: '0 2px', flexShrink: 0 }} />
+            <button className="pixel-office-editor-btn" style={activeTool === EditTool.FURNITURE_PICK ? activeBtnStyle : btnStyle} onClick={() => onToolChange(EditTool.FURNITURE_PICK)} title="Pick furniture type">Pick</button>
           </div>
           <div style={{ display: 'flex', gap: 4, overflowX: 'auto', flexWrap: 'nowrap', paddingBottom: 2 }}>
             {categoryItems.map(entry => {
               const cached = getCachedSprite(entry.sprite, 2)
               const isSelected = selectedFurnitureType === entry.type
               return (
-                <button key={entry.type} onClick={() => onFurnitureTypeChange(entry.type)} title={entry.label} style={{
-                  width: thumbSize, height: thumbSize, background: '#2A2A3A',
-                  border: isSelected ? '2px solid #5a8cff' : '2px solid #4a4a6a',
-                  borderRadius: 0, cursor: 'pointer', padding: 0, display: 'flex',
+                <button className="pixel-office-editor-btn" key={entry.type} onClick={() => onFurnitureTypeChange(entry.type)} title={entry.label} style={{
+                  width: thumbSize, height: thumbSize, background: 'var(--card-soft)',
+                  border: isSelected ? '1px solid rgba(var(--accent-rgb), 0.7)' : '1px solid var(--border)',
+                  borderRadius: 8, cursor: 'pointer', padding: 0, display: 'flex',
                   alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0,
                 }}>
                   <canvas ref={el => {
@@ -246,13 +247,13 @@ export function EditorToolbar({
       {selectedFurnitureUid && (
         <div style={{ display: 'flex', flexDirection: 'column-reverse', gap: 3 }}>
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <button style={showFurnitureColor ? activeBtnStyle : btnStyle} onClick={() => setShowFurnitureColor(v => !v)} title="Adjust selected furniture color">Color</button>
+            <button className="pixel-office-editor-btn" style={showFurnitureColor ? activeBtnStyle : btnStyle} onClick={() => setShowFurnitureColor(v => !v)} title="Adjust selected furniture color">Color</button>
             {selectedFurnitureColor && (
-              <button style={{ ...btnStyle, fontSize: '11px', padding: '2px 6px' }} onClick={() => onSelectedFurnitureColorChange(null)} title="Remove color">Clear</button>
+              <button className="pixel-office-editor-btn" style={{ ...btnStyle, fontSize: '11px', padding: '2px 6px' }} onClick={() => onSelectedFurnitureColorChange(null)} title="Remove color">Clear</button>
             )}
           </div>
           {showFurnitureColor && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '4px 6px', background: '#181828', border: '2px solid #4a4a6a', borderRadius: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '4px 6px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10 }}>
               {effectiveColor.colorize ? (
                 <>
                   <ColorSlider label="H" value={effectiveColor.h} min={0} max={360} onChange={v => handleSelFurnColorChange('h', v)} />
@@ -266,10 +267,10 @@ export function EditorToolbar({
               )}
               <ColorSlider label="B" value={effectiveColor.b} min={-100} max={100} onChange={v => handleSelFurnColorChange('b', v)} />
               <ColorSlider label="C" value={effectiveColor.c} min={-100} max={100} onChange={v => handleSelFurnColorChange('c', v)} />
-              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '11px', color: '#999', cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '11px', color: 'var(--text-muted)', cursor: 'pointer' }}>
                 <input type="checkbox" checked={!!effectiveColor.colorize}
                   onChange={e => onSelectedFurnitureColorChange({ ...effectiveColor, colorize: e.target.checked || undefined })}
-                  style={{ accentColor: 'rgba(90, 140, 255, 0.8)' }} />
+                  style={{ accentColor: 'var(--accent)' }} />
                 Colorize
               </label>
             </div>

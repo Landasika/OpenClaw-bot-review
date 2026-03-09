@@ -7,8 +7,6 @@ import { useI18n, LanguageSwitcher } from "@/lib/i18n";
 import { ThemeSwitcher } from "@/lib/theme";
 
 const BUGS_ENABLED_KEY = "pixel-office-bugs-enabled";
-const BUGS_COUNT_KEY = "pixel-office-bugs-count";
-const BUGS_MAX = 400;
 
 const NAV_ITEMS = [
   {
@@ -31,6 +29,7 @@ const NAV_ITEMS = [
     group: "nav.tasks",
     items: [
       { href: "/tasks", icon: "📋", labelKey: "nav.taskManagement" },
+      { href: "/epics", icon: "🎯", labelKey: "nav.epicManagement" },
       { href: "/meetings", icon: "🗂️", labelKey: "nav.meetings" },
       { href: "/meeting-settings", icon: "🗓️", labelKey: "nav.meetingSettings" },
     ],
@@ -50,9 +49,7 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileAgentCount, setMobileAgentCount] = useState<number | null>(null);
-  const [experimentOpen, setExperimentOpen] = useState(false);
   const [bugsEnabled, setBugsEnabled] = useState(false);
-  const [bugsCount, setBugsCount] = useState(5);
   const [logoCarry, setLogoCarry] = useState<{ active: boolean; dx: number; dy: number; angle: number; hidden: boolean }>({
     active: false,
     dx: 0,
@@ -99,11 +96,8 @@ export function Sidebar() {
   useEffect(() => {
     const syncFromStorage = () => {
       const enabled = localStorage.getItem(BUGS_ENABLED_KEY) === "true";
-      const raw = Number(localStorage.getItem(BUGS_COUNT_KEY) || "5");
-      const count = Math.max(0, Math.min(BUGS_MAX, Number.isFinite(raw) ? raw : 5));
       bugsEnabledRef.current = enabled;
       setBugsEnabled(enabled);
-      setBugsCount(count);
     };
     syncFromStorage();
     window.addEventListener("storage", syncFromStorage);
@@ -113,20 +107,6 @@ export function Sidebar() {
       window.removeEventListener("openclaw-bugs-config-change", syncFromStorage as EventListener);
     };
   }, []);
-
-  const toggleBugs = () => {
-    const next = !bugsEnabled;
-    setBugsEnabled(next);
-    localStorage.setItem(BUGS_ENABLED_KEY, String(next));
-    window.dispatchEvent(new CustomEvent("openclaw-bugs-config-change"));
-  };
-
-  const onBugCountChange = (nextCount: number) => {
-    const clamped = Math.max(0, Math.min(BUGS_MAX, nextCount));
-    setBugsCount(clamped);
-    localStorage.setItem(BUGS_COUNT_KEY, String(clamped));
-    window.dispatchEvent(new CustomEvent("openclaw-bugs-config-change"));
-  };
 
   useEffect(() => {
     const stopDrag = () => {
@@ -319,72 +299,25 @@ export function Sidebar() {
                         {group.items.map((item) => {
                           const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
                           return (
-                            <Link
-                              key={item.href}
-                              href={item.href}
-                              onClick={() => setMobileMenuOpen(false)}
-                              className={`nav-item flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors ${
-                                active
-                                  ? "nav-item-active bg-[var(--accent)]/15 text-[var(--accent)] font-medium"
-                                  : "text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--bg)]"
-                              }`}
-                            >
-                              <span className="text-base">{item.icon}</span>
-                              {t(item.labelKey)}
-                            </Link>
+                            <div key={item.href}>
+                              <Link
+                                href={item.href}
+                                onClick={() => setMobileMenuOpen(false)}
+                                className={`nav-item flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors ${
+                                  active
+                                    ? "nav-item-active bg-[var(--accent)]/15 text-[var(--accent)] font-medium"
+                                    : "text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--bg)]"
+                                }`}
+                              >
+                                <span className="text-base">{item.icon}</span>
+                                {t(item.labelKey)}
+                              </Link>
+                            </div>
                           );
                         })}
                       </div>
                     </div>
                   ))}
-                  <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/65 p-2">
-                    <button
-                      onClick={() => setExperimentOpen((v) => !v)}
-                      className={`w-full flex items-center justify-between rounded-lg px-3 py-2 transition-colors ${
-                        experimentOpen
-                          ? "bg-[var(--accent)]/12 text-[var(--accent)] border border-[var(--accent)]/35"
-                          : "bg-[var(--bg)] text-[var(--text)] border border-[var(--border)] hover:bg-[var(--accent)]/8"
-                      }`}
-                    >
-                      <span className="flex items-center gap-2">
-                        <span className="text-sm">🧪</span>
-                        <span className="text-sm font-semibold tracking-wide">{t("nav.experiments")}</span>
-                      </span>
-                      <span
-                        className={`inline-flex items-center justify-center text-base leading-none transition-transform ${
-                          experimentOpen ? "text-[var(--accent)] rotate-180" : "text-[var(--text-muted)]"
-                        }`}
-                      >
-                        ⌄
-                      </span>
-                    </button>
-                    {experimentOpen && (
-                      <div className="mt-2 space-y-2 rounded-lg border border-[var(--border)] bg-[var(--card)] p-2">
-                        <button
-                          onClick={toggleBugs}
-                          className={`w-full px-3 py-1.5 text-xs rounded-lg border transition-colors ${
-                            bugsEnabled
-                              ? "bg-[var(--accent)]/10 border-[var(--accent)]/30 text-[var(--accent)]"
-                              : "bg-[var(--card)] border-[var(--border)] text-[var(--text-muted)]"
-                          }`}
-                        >
-                          {bugsEnabled ? `🐛 ${t("nav.bugsOn")}` : `🐛 ${t("nav.bugsOff")}`}
-                        </button>
-                        <label className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs rounded-lg border bg-[var(--card)] border-[var(--border)] text-[var(--text-muted)]">
-                          <span>{t("nav.bugsCount")} {bugsCount}</span>
-                          <input
-                            type="range"
-                            min={0}
-                            max={BUGS_MAX}
-                            step={1}
-                            value={bugsCount}
-                            onChange={(e) => onBugCountChange(Number(e.target.value))}
-                            className="w-24 accent-[var(--accent)]"
-                          />
-                        </label>
-                      </div>
-                    )}
-                  </div>
                 </div>
               </nav>
             </aside>
@@ -486,88 +419,30 @@ export function Sidebar() {
                   {group.items.map((item) => {
                     const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
                     return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        title={collapsed ? t(item.labelKey) : undefined}
-                        className={`nav-item flex items-center rounded-lg text-sm transition-colors ${
-                          active
-                            ? "nav-item-active bg-[var(--accent)]/15 text-[var(--accent)] font-medium"
-                            : "text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--bg)]"
-                        }`}
-                        style={{
-                          padding: collapsed ? "8px 0" : "8px 12px",
-                          justifyContent: collapsed ? "center" : "flex-start",
-                          gap: collapsed ? 0 : 10,
-                        }}
-                      >
-                        <span className="text-base">{item.icon}</span>
-                        {!collapsed && t(item.labelKey)}
-                      </Link>
+                      <div key={item.href}>
+                        <Link
+                          href={item.href}
+                          title={collapsed ? t(item.labelKey) : undefined}
+                          className={`nav-item flex items-center rounded-lg text-sm transition-colors ${
+                            active
+                              ? "nav-item-active bg-[var(--accent)]/15 text-[var(--accent)] font-medium"
+                              : "text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--bg)]"
+                          }`}
+                          style={{
+                            padding: collapsed ? "8px 0" : "8px 12px",
+                            justifyContent: collapsed ? "center" : "flex-start",
+                            gap: collapsed ? 0 : 10,
+                          }}
+                        >
+                          <span className="text-base">{item.icon}</span>
+                          {!collapsed && t(item.labelKey)}
+                        </Link>
+                      </div>
                     );
                   })}
                 </div>
               </div>
             ))}
-            {!collapsed && (
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/65 p-1">
-                <button
-                  onClick={() => setExperimentOpen((v) => !v)}
-                  className={`w-full flex items-center justify-between rounded-lg px-3 py-2 transition-colors ${
-                    experimentOpen
-                      ? "bg-[var(--accent)]/12 text-[var(--accent)] border border-[var(--accent)]/35"
-                      : "bg-[var(--bg)] text-[var(--text)] border border-[var(--border)] hover:bg-[var(--accent)]/8"
-                  }`}
-                >
-                  <span className="flex items-center gap-2">
-                    <span className="text-sm">🧪</span>
-                    <span className="text-sm font-semibold tracking-wide">{t("nav.experiments")}</span>
-                  </span>
-                  <span
-                    className={`inline-flex items-center justify-center text-base leading-none transition-transform ${
-                      experimentOpen ? "text-[var(--accent)] rotate-180" : "text-[var(--text-muted)]"
-                    }`}
-                  >
-                    ⌄
-                  </span>
-                </button>
-                {experimentOpen && (
-                  <div className="mt-2 space-y-2 rounded-lg border border-[var(--border)] bg-[var(--card)] p-2">
-                    <button
-                      onClick={toggleBugs}
-                      className={`w-full px-3 py-1.5 text-xs rounded-lg border transition-colors ${
-                        bugsEnabled
-                          ? "bg-[var(--accent)]/10 border-[var(--accent)]/30 text-[var(--accent)]"
-                          : "bg-[var(--card)] border-[var(--border)] text-[var(--text-muted)]"
-                      }`}
-                    >
-                      {bugsEnabled ? `🐛 ${t("nav.bugsOn")}` : `🐛 ${t("nav.bugsOff")}`}
-                    </button>
-                    <label className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs rounded-lg border bg-[var(--card)] border-[var(--border)] text-[var(--text-muted)]">
-                      <span>{t("nav.bugsCount")} {bugsCount}</span>
-                      <input
-                        type="range"
-                        min={0}
-                        max={BUGS_MAX}
-                        step={1}
-                        value={bugsCount}
-                        onChange={(e) => onBugCountChange(Number(e.target.value))}
-                        className="w-24 accent-[var(--accent)]"
-                      />
-                    </label>
-                  </div>
-                )}
-              </div>
-            )}
-            {collapsed && (
-              <button
-                onClick={() => setCollapsed(false)}
-                title={t("nav.experiments")}
-                className="w-full flex items-center justify-center rounded-lg px-2 py-2 text-base border border-[var(--border)] bg-[var(--card)]/65 text-[var(--text)] hover:bg-[var(--bg)] transition-colors"
-              >
-                🧪
-              </button>
-            )}
           </div>
         </nav>
       </aside>

@@ -28,6 +28,7 @@ interface Session {
   totalTokens: number;
   contextTokens: number;
   systemSent: boolean;
+  isFull?: boolean;
 }
 
 interface GatewayInfo {
@@ -207,7 +208,14 @@ function SessionList({ agentId }: { agentId: string }) {
     ])
       .then(([sessData, configData]) => {
         if (sessData.error) setError(sessData.error);
-        else setSessions(sessData.sessions || []);
+        else {
+          // 检测会话是否满了
+          const sessionsWithFull = (sessData.sessions || []).map((s: Session) => ({
+            ...s,
+            isFull: s.contextTokens > 0 && s.totalTokens / s.contextTokens > 0.9
+          }));
+          setSessions(sessionsWithFull);
+        }
         if (configData.gateway) setGateway(configData.gateway);
       })
       .catch((e) => setError(e.message))
@@ -275,6 +283,32 @@ function SessionList({ agentId }: { agentId: string }) {
     setTestingAll(false);
   }
 
+  async function deleteSession(sessionKey: string, sessionId: string | null, e?: React.MouseEvent) {
+    e?.stopPropagation();
+
+    if (!confirm(t("sessions.confirmDelete") || "确定要删除这个会话吗？")) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/sessions/${agentId}/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionKey, sessionId }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        // 从列表中移除已删除的会话
+        setSessions((prev) => prev.filter((s) => s.key !== sessionKey));
+      } else {
+        alert(`删除失败: ${data.error}`);
+      }
+    } catch (err: any) {
+      alert(`删除失败: ${err.message}`);
+    }
+  }
+
   return (
     <main className="min-h-screen p-4 md:p-8 max-w-6xl mx-auto">
       <div className="flex flex-col gap-3 mb-6 md:flex-row md:items-center md:justify-between">
@@ -334,6 +368,13 @@ function SessionList({ agentId }: { agentId: string }) {
                   >
                     {testResults[s.key]?.status === "testing" ? t("sessions.testing") : t("sessions.test")}
                   </button>
+                  <button
+                    onClick={(e) => deleteSession(s.key, s.sessionId, e)}
+                    className="px-3 py-1 rounded-lg text-xs font-medium border border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20 transition"
+                    title={t("sessions.delete") || "删除会话"}
+                  >
+                    🗑️
+                  </button>
                   <span className="text-xs text-[var(--text-muted)]">{formatTimeAgo(s.updatedAt)}</span>
                 </div>
               </div>
@@ -356,6 +397,14 @@ function SessionList({ agentId }: { agentId: string }) {
                   {testResults[s.key].error && (
                     <span className="ml-2 opacity-80 break-all">{testResults[s.key].error}</span>
                   )}
+                </div>
+              )}
+
+              {/* Session full warning */}
+              {s.isFull && (
+                <div className="mb-2 px-3 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-300 text-xs">
+                  <span className="font-medium">⚠️ {t("sessions.sessionFull") || "会话已满"}</span>
+                  <span className="ml-2 opacity-80">{t("sessions.sessionFullHint") || "上下文窗口已使用超过90%，建议删除会话"}</span>
                 </div>
               )}
               {/* Context usage bar */}
